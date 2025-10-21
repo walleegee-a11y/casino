@@ -1,0 +1,9 @@
+\rm -rf formality_svf 
+\rm -rf logs 
+\rm -rf reports 
+\rm -rf *.log 
+\rm -rf logs
+\rm -rf *lck
+\rm -rf FM_WORK*
+\rm -rf LEC_FM*
+\rm -rf *session*

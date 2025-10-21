@@ -1,0 +1,13 @@
+
+
+set restore_db_file_check 0
+
+set_global timing_derate_spatial_distance_unit 1nm
+set_global timing_apply_default_primary_input_assertion 0
+
+set_global report_precision 3 
+set_global report_timing_format "timing_point cell fanout total_derate load slew incr_delay delay arrival"
+set_table_style -no_frame_fix_width -nosplit
+set timing_report_enable_cppr_point true
+set timing_report_enable_skew_in_reports true
+set timing_report_enable_auto_column_width true

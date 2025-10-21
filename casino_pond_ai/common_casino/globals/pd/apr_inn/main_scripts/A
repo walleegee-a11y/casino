@@ -1,0 +1,42 @@
+01_init.tcl:source ${common}/globals/pd/apr_inn/util_scripts/make_view_definition.tcl 
+01_init.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/design_option.tcl
+01_init.tcl:source ${common}/globals/pd/apr_inn/YMK/FP/Chipsize.tcl
+01_init.tcl:source ${common}/globals/pd/apr_inn/YMK/FP/IO.tcl
+01_init.tcl:source ${common}/globals/pd/apr_inn/YMK/FP/Hard_Blockage.tcl
+02_place.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/set_load.tcl
+02_place.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/design_option.tcl 
+02_place.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/analysis_option.tcl
+02_place.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/place_option.tcl
+02_place.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/opt_option.tcl
+02_place.tcl:source ${common}/globals/pd/apr_inn/util_scripts/createPathGroups.tcl
+02_place.tcl:#source ${common}/globals/pd/apr_inn/util_scripts/dont_use_cell.tcl
+02_place.tcl:source ${common}/globals/pd/apr_inn/util_scripts/ocv.tcl
+02_place.tcl:source ${common}/globals/pd/apr_inn/util_scripts/cellPadding.tcl 
+02_place.tcl:source ${common}/globals/pd/apr_inn/util_scripts/make_uncertainty.tcl
+02_place.tcl:source ${common}/globals/pd/apr_inn/user_scripts/pre_place.tcl
+02_place.tcl:source ${common}/globals/pd/apr_inn/user_scripts/post_place.tcl
+03_cts.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/set_load.tcl
+03_cts.tcl:    source ${common}/globals/pd/apr_inn/mode_scripts/cts_option.tcl  
+03_cts.tcl:    source ${common}/globals/pd/apr_inn/mode_scripts/route_option.tcl  
+03_cts.tcl:source ${common}/globals/pd/apr_inn/util_scripts/make_uncertainty.tcl
+03_cts.tcl:source  ${common}/globals/pd/apr_inn/user_scripts/pre_cts.tcl
+03_cts.tcl:source  ${common}/globals/pd/apr_inn/user_scripts/post_cts.tcl 
+04_postcts.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/set_load.tcl
+04_postcts.tcl:source  ${common}/globals/pd/apr_inn/user_scripts/pre_postcts.tcl 
+04_postcts.tcl:source  ${common}/globals/pd/apr_inn/user_scripts/post_postcts.tcl 
+05_route.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/set_load.tcl
+05_route.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/route_option.tcl  
+05_route.tcl:source ${common}/globals/pd/apr_inn/util_scripts/ocv.tcl
+05_route.tcl:setExtractRCMode -lefTechFileMap ${common}/globals/pd/apr_inn/util_scripts/qrc.map
+05_route.tcl:source ${common}/globals/pd/apr_inn/util_scripts/make_uncertainty.tcl
+05_route.tcl:source  ${common}/globals/pd/apr_inn/user_scripts/pre_route.tcl 
+05_route.tcl:source  ${common}/globals/pd/apr_inn/user_scripts/post_route.tcl 
+06_postroute.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/set_load.tcl
+06_postroute.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/route_option.tcl  
+06_postroute.tcl:source  ${common}/globals/pd/apr_inn/user_scripts/pre_postroute.tcl 
+06_postroute.tcl:source  ${common}/globals/pd/apr_inn/user_scripts/post_postroute.tcl 
+07_chipfinish.tcl:source  ${common}/globals/pd/apr_inn/mode_scripts/set_load.tcl
+07_chipfinish.tcl:streamOut ${outfeedDirName}/gds/[dbGet top.name].gds.gz -mapFile ${common}/globals/pd/apr_inn/util_scripts/gds_layer_map -libName [dbGet top.name ] -stripes 1 -mode ALL -dieAreaAsBoundary 
+99_user_eco.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/set_load.tcl
+99_user_eco.tcl:source ${common}/globals/pd/apr_inn/mode_scripts/route_option.tcl  
+99_user_eco.tcl:    streamOut ${outfeedDirName}/gds/[dbGet top.name].gds.gz -mapFile ${common}/globals/pd/apr_inn/util_scripts/gds_layer_map -libName [dbGet top.name ] -stripes 1 -mode ALL -dieAreaAsBoundary 

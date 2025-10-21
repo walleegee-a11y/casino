@@ -1,0 +1,234 @@
+tasks:
+## All single tasks for innovus - start
+
+  - name: manual_inn
+    dependencies: []
+    command: "cd apr_inn ; source env_vars.csh ; source all_tools_env.csh ; innovus -log logs/manual/manual.log -files  ../common/globals/pd/apr_inn/main_scripts/90_manual.tcl"
+    priority: 9
+
+  - name: init_inn
+    dependencies: []
+    command: "cd apr_inn ; source env_vars.csh ; source all_tools_env.csh ; innovus -log logs/init -files  ../common/globals/pd/apr_inn/main_scripts/01_init.tcl "
+    priority: 1
+
+  - name: place_inn
+    dependencies: [init_inn]
+    command: "cd apr_inn ; source env_vars.csh ; source all_tools_env.csh ; innovus -log logs/place -files  ../common/globals/pd/apr_inn/main_scripts/02_place.tcl "
+    priority: 1
+
+  - name: cts_inn
+    dependencies: [place_inn]
+    command: "cd apr_inn ; source /mnt/appl/Tools/Env/data01_lic/cadence_env.csh ; source all_tools_env.csh ; innovus -log logs/cts -files  ../common/globals/pd/apr_inn/main_scripts/03_cts.tcl   "
+    priority: 1
+
+  - name: postcts_inn
+    dependencies: [cts_inn]
+    command: "cd apr_inn ; source env_vars.csh ; source all_tools_env.csh ; innovus -log logs/postcts -files  ../common/globals/pd/apr_inn/main_scripts/04_postcts.tcl "
+    priority: 1
+
+  - name: route_inn
+    dependencies: [postcts_inn]
+    command: "cd apr_inn ; source env_vars.csh ; source all_tools_env.csh ; innovus -log logs/route -files  ../common/globals/pd/apr_inn/main_scripts/05_route.tcl "
+    priority: 1
+
+  - name: postroute_inn
+    dependencies: [route_inn]
+    command: "cd apr_inn ; source env_vars.csh ; source all_tools_env.csh ; innovus -log logs/postroute -files  ../common/globals/pd/apr_inn/main_scripts/06_postroute.tcl "
+    priority: 1
+
+  - name: chipfinish_inn
+    dependencies: [postroute_inn]
+    command: "cd apr_inn ; source env_vars.csh ; source all_tools_env.csh ; innovus -log logs/chipfinish -files  ../common/globals/pd/apr_inn/main_scripts/07_chipfinish.tcl "
+    priority: 1
+
+
+#  - name: eco_inn
+#    dependencies: [eco_inn]
+#    command: "cd apr_inn ; source env_vars.csh ; source all_tools_env.csh ; sleep 1 ; touch done"
+#    priority: 1
+#
+#
+## All single tasks for innovus - end
+#
+## innovus subtasks - start
+#
+  - name: apr_inn
+    subtasks: [place_inn, cts_inn, postcts_inn, route_inn, postroute_inn, chipfinish_inn]
+    priority: 1
+
+
+#  - name: apr_inn
+#    subtasks: [init_inn, place_inn, cts_inn, postcts_inn, route_inn, postroute_inn, chipfinish_inn]
+#    priority: 1
+#
+#  - name: apr_2_pex
+#    subtasks: [apr_inn, pex]
+#    priority: 1
+#
+#  - name: apr_2_sta
+#    subtasks: [apr_inn, pex, sta_pt]
+#    priority: 1
+#
+#  - name: apr_2_dmsa
+#    subtasks: [apr_inn, pex, sta_pt, dmsa]
+#    priority: 1
+#
+#  - name: apr_2_pv
+#    subtasks: [apr_inn, pex, pv]
+#    priority: 1
+#
+#  - name: teco_pi
+#    subtasks: [sta_pt, dmsa, eco_inn]
+#    priority: 1
+#
+#  - name: teco_pd
+#    subtasks: [eco_inn, sta_pt, dmsa]
+#    priority: 1
+#
+## innovus subtasks - end
+#
+## All single tasks for pex - start
+#
+  - name: pex
+    dependencies: []
+    command: "cd pex ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pex/:RUN_STAR "
+    priority: 1
+#
+## All single tasks for pex - start
+#
+#
+## All single tasks for pv - start
+#
+  - name: GDS
+    dependencies: []
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_GDS "
+    priority: 10
+
+  - name: V2LVS
+    dependencies: []
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_V2LVS "
+    priority: 10
+
+  - name: DUMMY
+    dependencies: [GDS]
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_DUMMY "
+    priority: 11
+
+  - name: DRC
+    dependencies: [DUMMY]
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_DRC "
+    priority: 12
+
+  - name: LVS
+    dependencies: [DUMMY,V2LVS]
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_LVS "
+    priority: 12
+
+  - name: ANT
+    dependencies: [DUMMY]
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_ANT "
+    priority: 12
+
+  - name: ESD
+    dependencies: [DUMMY]
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_ESD "
+    priority: 12
+
+  - name: LATCH
+    dependencies: [DUMMY]
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_LATCH "
+    priority: 12
+
+  - name: DSR
+    dependencies: [DUMMY]
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_DSR "
+    priority: 12
+
+  - name: RTO
+    dependencies: [DUMMY]
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_RTO "
+    priority: 12
+
+
+  - name: LVL
+    dependencies: [DUMMY]
+    command: "cd pv ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/pv/:RUN_LVL "
+    priority: 12
+
+
+
+#
+## All single tasks for pv - end
+#
+## pv subtasks - start
+#
+  - name: pv
+    subtasks: [GDS, V2LVS, DUMMY, DRC, LVS, ANT, ESD, LATCH, DSR]
+    priority: 1
+#
+## pv subtasks - end
+#
+## All single tasks for psi - start
+  - name: static
+    dependencies: []
+    command: "cd psi ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/psi/:RUN_STATIC "
+    priority: 20
+
+
+  - name: dynamic
+    dependencies: []
+    command: "cd psi ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/psi/:RUN_DYNAMIC "
+    priority: 20
+
+
+  - name: sigem
+    dependencies: []
+    command: "cd psi ; source env_vars.csh ; source all_tools_env.csh ; source ../common/globals/psi/:RUN_SIGEM "
+    priority: 20
+#
+## All single tasks for psi - end
+#
+## psi subtasks - start
+
+  - name: psi
+    dependencies: []
+    subtasks: [static,dynamic,sigem]
+    priority: 1
+#
+## psi subtasks - end
+#
+#
+  - name: apr_inn_all
+    subtasks: [apr_inn, pex, pv, psi]
+    priority: 1
+#
+#
+#
+#
+### All single tasks for pi - start
+  - name: lec_fm
+    dependencies: []
+    command: "gnome-terminal --wait --title='lec_fm @ pi' -- csh  -c ' cd lec_fm ; source ./all_tools_env.csh ; ./../common/globals/pi/lec_fm/:run_lec_fm.csh'"
+    priority: 1
+
+  - name: ldrc_dc
+    dependencies: []
+    command: "gnome-terminal --wait --title='ldrc_dc @ pi' -- csh  -c ' cd ldrc_dc ; source ./all_tools_env.csh ; ./../common/globals/pi/ldrc_dc/:run_ldrc_dc.csh'"
+    priority: 1
+
+  - name: vclp
+    dependencies: []
+    command: "gnome-terminal --wait --title='vclp @ pi' -- csh  -c ' cd vclp ; source ./all_tools_env.csh ; ./../common/globals/pi/vclp/:run_vclp.csh'"
+    priority: 1
+
+  - name: sta_pt
+    dependencies: []
+    command: "gnome-terminal --wait --title='sta @ pi' -- csh  -c ' cd ./sta_pt/ ; source all_tools_env.csh ; source ./../common/globals/pi/sta_pt/:run_sta_pt.csh'"
+    priority: 1
+ 
+  - name: dmsa
+    dependencies: []
+    command: "gnome-terminal --wait --title='dmsa @ pi' -- csh  -c ' cd ./sta_pt/dmsa/ ; source all_tools_env.csh ; tclsh ./../../common/globals/pi/dmsa/:run_dmsa.tcl ; csh -c 'exit'"
+    priority: 1
+
+### All single tasks for pi - end
