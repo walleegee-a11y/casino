@@ -370,7 +370,7 @@ if GUI_AVAILABLE:
             """Generate dynamic table headers based on configuration and discovered keywords"""
             path_headers = [
                 "Base Dir", "Top Name", "User", "Block", "DK Ver/Tag",
-                "Run Version", "Job", "Task", "Status"
+                "Run Ver", "Job", "Task", "Status"
             ]
 
             keyword_headers = []
@@ -650,11 +650,11 @@ if GUI_AVAILABLE:
             filter_row1.addStretch()
             filter_layout.addLayout(filter_row1)
 
-            # Filter Row 2: Run Version, Job, Task, Status
+            # Filter Row 2: Run Ver, Job, Task, Status
             filter_row2 = QHBoxLayout()
 
-            # Run Version filter
-            filter_row2.addWidget(QLabel("Run Version:"))
+            # Run Ver filter
+            filter_row2.addWidget(QLabel("Run Ver:"))
             self.run_version_combo = QComboBox()
             self.run_version_combo.addItems(["all"] + self.path_components.get('run_version', []))
             self.run_version_combo.setEditable(True)
@@ -664,7 +664,7 @@ if GUI_AVAILABLE:
 
             self.run_version_multi_btn = QPushButton("...")
             self.run_version_multi_btn.setMaximumWidth(30)
-            self.run_version_multi_btn.clicked.connect(lambda: self.show_multi_select_dialog('run_version', 'Run Version'))
+            self.run_version_multi_btn.clicked.connect(lambda: self.show_multi_select_dialog('run_version', 'Run Ver'))
             filter_row2.addWidget(self.run_version_multi_btn)
 
             # Job filter
@@ -1031,7 +1031,7 @@ if GUI_AVAILABLE:
             except Exception as e:
                 pass
 
-            headers = ["Base Dir", "Top Name", "User", "Block", "DK Ver/Tag", "Run Version"]
+            headers = ["Base Dir", "Top Name", "User", "Block", "DK Ver/Tag", "Run Ver"]
             self.table.setHeaderLabels(headers)
 
             # FAST: detailed_check=False means no job/task checking
@@ -1074,7 +1074,7 @@ if GUI_AVAILABLE:
                 item.setData(0, Qt.UserRole + 3, run.get('jobs_and_tasks', {}))
 
                 tooltip_parts = [
-                    f"Run Version: {run_version}",
+                    f"Run Ver: {run_version}",
                     f"Path: {run['full_path']}",
                     "",
                     "Actions:",
@@ -1580,7 +1580,7 @@ if GUI_AVAILABLE:
             if self.dk_ver_tag_combo.currentText() != "all":
                 active_filters.append(f"DK Ver/Tag: {self.dk_ver_tag_combo.currentText()}")
             if self.run_version_combo.currentText() != "all":
-                active_filters.append(f"Run Version: {self.run_version_combo.currentText()}")
+                active_filters.append(f"Run Ver: {self.run_version_combo.currentText()}")
 
             keyword_filter_text = self.keyword_filter_input.text().strip()
             if keyword_filter_text:
@@ -4292,7 +4292,21 @@ if GUI_AVAILABLE:
 
             # Build selected column indices: x-axis + y-axis columns
             selected_column_indices = [x_column] + y_columns
-            selected_column_names = [headers[idx] for idx in selected_column_indices if idx < len(headers)]
+
+            # Filter out columns that are already in run_info_headers to avoid duplicates
+            # IMPORTANT: Filter both indices AND names together to keep them in sync
+            run_info_headers_set = {"User", "Block", "DK Ver/Tag", "Run Ver", "Job", "Task"}
+            filtered_indices = []
+            filtered_names = []
+            for idx in selected_column_indices:
+                if idx < len(headers):
+                    col_name = headers[idx]
+                    if col_name not in run_info_headers_set:
+                        filtered_indices.append(idx)
+                        filtered_names.append(col_name)
+
+            selected_column_indices = filtered_indices
+            selected_column_names = filtered_names
 
             # Get selected rows from main table
             selected_items = self.table.selectedItems()
@@ -4391,9 +4405,9 @@ if GUI_AVAILABLE:
             # Process events to ensure window is displayed
             QApplication.processEvents()
 
-            # Update status bar
+            # Update status bar - show additional keyword columns (excluding run_info columns)
             self.status_bar.showMessage(
-                f"Created summary table with {len(selected_column_names)} columns and {len(selected_rows)} rows from chart dialog selection")
+                f"Created summary table with {len(selected_column_names)} additional columns and {len(selected_rows)} rows from chart dialog selection")
 
             # Don't close dialog - it's now non-modal and fully interactive alongside the table
 
@@ -4667,8 +4681,12 @@ if GUI_AVAILABLE:
             """Create summary table window"""
             from PyQt5.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTreeWidget
 
+            # Filter out columns that are already in run_info_headers to avoid duplicates
+            run_info_headers_set = {"User", "Block", "DK Ver/Tag", "Run Ver", "Job", "Task"}
+            filtered_selected_columns = [col for col in selected_columns if col not in run_info_headers_set]
+
             table_window = QMainWindow()
-            table_window.setWindowTitle(f"Summary Table - {len(selected_columns)} columns, {len(items)} items")
+            table_window.setWindowTitle(f"Summary Table - {len(filtered_selected_columns)} columns, {len(items)} items")
             table_window.setGeometry(300, 300, 1200, 800)
 
             # CRITICAL: Set window flags to keep window alive and track it
@@ -4687,7 +4705,7 @@ if GUI_AVAILABLE:
             # Create table
             summary_table = QTreeWidget()
             run_info_headers = ["User", "Block", "DK Ver/Tag", "Run Ver", "Job", "Task"]
-            summary_table.setHeaderLabels(run_info_headers + selected_columns)
+            summary_table.setHeaderLabels(run_info_headers + filtered_selected_columns)
             summary_table.setAlternatingRowColors(True)
 
             for i in range(len(run_info_headers)):
@@ -4708,7 +4726,7 @@ if GUI_AVAILABLE:
                 row_data = [user, block, dk_ver_tag, run_version, job, task]
 
                 # Add keyword values
-                for col_name in selected_columns:
+                for col_name in filtered_selected_columns:
                     col_idx = dynamic_headers.index(col_name) if col_name in dynamic_headers else -1
                     if col_idx >= 0:
                         value = item.text(col_idx)
@@ -4734,7 +4752,7 @@ if GUI_AVAILABLE:
             # Buttons
             btn_layout = QHBoxLayout()
             export_btn = QPushButton("Export to CSV")
-            export_btn.clicked.connect(lambda: self.export_summary_to_csv(summary_table, selected_columns))
+            export_btn.clicked.connect(lambda: self.export_summary_to_csv(summary_table, filtered_selected_columns))
             btn_layout.addWidget(export_btn)
             btn_layout.addStretch()
             layout.addLayout(btn_layout)
@@ -4745,10 +4763,14 @@ if GUI_AVAILABLE:
             table_window.activateWindow()
 
             # Update status bar
-            self.status_bar.showMessage(f"Created summary table with {len(selected_columns)} columns and {len(items)} items")
+            self.status_bar.showMessage(f"Created summary table with {len(filtered_selected_columns)} columns and {len(items)} items")
 
         def export_summary_to_csv(self, summary_table, selected_columns):
             """Export summary table to CSV"""
+            # Filter out columns that are already in run_info_headers to avoid duplicates
+            run_info_headers_set = {"User", "Block", "DK Ver/Tag", "Run Ver", "Job", "Task"}
+            filtered_selected_columns = [col for col in selected_columns if col not in run_info_headers_set]
+
             filename, _ = QFileDialog.getSaveFileName(
                 self, "Export Summary", "", "CSV files (*.csv)")
 
@@ -4756,7 +4778,7 @@ if GUI_AVAILABLE:
                 with open(filename, 'w', newline='') as f:
                     writer = csv.writer(f)
                     run_info_headers = ["User", "Block", "DK Ver/Tag", "Run Ver", "Job", "Task"]
-                    writer.writerow(run_info_headers + selected_columns)
+                    writer.writerow(run_info_headers + filtered_selected_columns)
 
                     for i in range(summary_table.topLevelItemCount()):
                         item = summary_table.topLevelItem(i)

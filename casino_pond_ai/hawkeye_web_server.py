@@ -1512,8 +1512,8 @@ HTML_TEMPLATE = r"""
         function compareSelectedRuns() {
             const checkboxes = document.querySelectorAll('.run-checkbox:checked');
 
-            if (checkboxes.length < 2) {
-                alert('Please select at least 2 run versions to compare.');
+            if (checkboxes.length < 1) {
+                alert('Please select at least 1 run version to compare.');
                 return;
             }
 
@@ -1697,29 +1697,148 @@ HTML_TEMPLATE = r"""
         }
 
         // Keyword grouping function
+        // Helper function to check if keyword matches a template-based pattern
+        function matchesTemplate(keyword, templateName) {
+            // Check if template contains variables like {mode}, {corner}, etc.
+            if (!templateName.includes('{')) {
+                return false;
+            }
+
+            // Convert template to regex pattern
+            // Replace template variables with regex patterns
+            let pattern = templateName
+                .replace(/\{mode\}/g, '[^_]+')              // mode: any non-underscore chars
+                .replace(/\{corner\}/g, '[^_]+(?:_[^_]+)*') // corner: can have underscores (e.g., ss_0p81v_m40c_Cworst_T)
+                .replace(/\{path_type\}/g, '[^_]+')         // path_type: reg2reg, all, etc.
+                .replace(/\{noise_type\}/g, '[^_]+')        // noise_type: above_low, below_high
+                .replace(/\{task_name\}/g, '[^_]+')         // task_name: place, route, etc.
+                // Escape special regex characters in the rest of the string
+                .replace(/\./g, '\\.');
+
+            // Create regex with anchors
+            const regex = new RegExp('^' + pattern + '$');
+
+            return regex.test(keyword);
+        }
+
+        // Helper function to get group order from YAML configuration
+        function getGroupOrderFromYAML() {
+            const groupSet = new Set();
+            const preferredOrder = ['err/warn', 'timing', 'congestion', 'utilization'];
+
+            // Extract all unique groups from YAML configuration
+            // Check both 'tasks' and 'task_templates' sections
+            if (keywordGroupConfig) {
+                // Check tasks section
+                if (keywordGroupConfig.tasks) {
+                    for (const taskName in keywordGroupConfig.tasks) {
+                        const task = keywordGroupConfig.tasks[taskName];
+                        if (task.keywords) {
+                            for (const keywordConfig of task.keywords) {
+                                if (keywordConfig.group) {
+                                    groupSet.add(keywordConfig.group);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check task_templates section
+                if (keywordGroupConfig.task_templates) {
+                    for (const templateName in keywordGroupConfig.task_templates) {
+                        const template = keywordGroupConfig.task_templates[templateName];
+                        if (template.keywords) {
+                            for (const keywordConfig of template.keywords) {
+                                if (keywordConfig.group) {
+                                    groupSet.add(keywordConfig.group);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Build ordered list: preferred groups first, then remaining alphabetically
+            const groupOrder = [];
+
+            // Add preferred groups if they exist in YAML
+            preferredOrder.forEach(group => {
+                if (groupSet.has(group)) {
+                    groupOrder.push(group);
+                    groupSet.delete(group);
+                }
+            });
+
+            // Add remaining groups alphabetically
+            const remainingGroups = Array.from(groupSet).sort();
+            groupOrder.push(...remainingGroups);
+
+            return groupOrder;
+        }
+
         function groupKeywordsByConvention(keywords) {
             const groups = {};
 
             keywords.forEach(keyword => {
                 let groupName = 'Other Keywords';
 
-                // Get group from YAML configuration only
-                if (keywordGroupConfig && keywordGroupConfig.tasks) {
-                    for (const taskName in keywordGroupConfig.tasks) {
-                        const task = keywordGroupConfig.tasks[taskName];
-                        if (task.keywords) {
-                            for (const keywordConfig of task.keywords) {
-                                if (keywordConfig.name === keyword && keywordConfig.group) {
-                                    groupName = keywordConfig.group;
-                                    break;
-                                }
-                                if (keywordConfig.group && keyword.startsWith(keywordConfig.name + '_')) {
-                                    groupName = keywordConfig.group;
-                                    break;
+                // Get group from YAML configuration
+                // Check both 'tasks' and 'task_templates' sections
+                if (keywordGroupConfig) {
+                    // Search through tasks section
+                    if (keywordGroupConfig.tasks) {
+                        for (const taskName in keywordGroupConfig.tasks) {
+                            const task = keywordGroupConfig.tasks[taskName];
+                            if (task.keywords) {
+                                for (const keywordConfig of task.keywords) {
+                                    // Try exact match first
+                                    if (keywordConfig.name === keyword && keywordConfig.group) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                    // Try prefix match for derived keywords (e.g., s_tns_all from s_tns)
+                                    if (keywordConfig.group && !keywordConfig.name.includes('{') &&
+                                        keyword.startsWith(keywordConfig.name + '_')) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                    // Try template match for template-based keywords
+                                    if (keywordConfig.group && matchesTemplate(keyword, keywordConfig.name)) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
                                 }
                             }
+                            if (groupName !== 'Other Keywords') break;
                         }
-                        if (groupName !== 'Other Keywords') break;
+                    }
+
+                    // If not found in tasks, search through task_templates section
+                    if (groupName === 'Other Keywords' && keywordGroupConfig.task_templates) {
+                        for (const templateName in keywordGroupConfig.task_templates) {
+                            const template = keywordGroupConfig.task_templates[templateName];
+                            if (template.keywords) {
+                                for (const keywordConfig of template.keywords) {
+                                    // Try exact match first
+                                    if (keywordConfig.name === keyword && keywordConfig.group) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                    // Try prefix match for derived keywords (e.g., s_tns_all from s_tns)
+                                    if (keywordConfig.group && !keywordConfig.name.includes('{') &&
+                                        keyword.startsWith(keywordConfig.name + '_')) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                    // Try template match for template-based keywords
+                                    if (keywordConfig.group && matchesTemplate(keyword, keywordConfig.name)) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (groupName !== 'Other Keywords') break;
+                        }
                     }
                 }
 
@@ -1734,9 +1853,9 @@ HTML_TEMPLATE = r"""
                 groups[group].sort();
             });
 
-            // Sort groups
+            // Sort groups - dynamically extract order from vista_casino.yaml
             const sortedGroups = {};
-            const groupOrder = ['err/warn', 'timing', 'utilization', 'congestion', 'drc'];
+            const groupOrder = getGroupOrderFromYAML();
 
             groupOrder.forEach(groupName => {
                 if (groups[groupName]) {
@@ -1744,6 +1863,7 @@ HTML_TEMPLATE = r"""
                 }
             });
 
+            // Add any groups not in YAML-defined order (shouldn't happen but be safe)
             Object.keys(groups).sort().forEach(groupName => {
                 if (!groupOrder.includes(groupName) && groupName !== 'Other Keywords') {
                     sortedGroups[groupName] = groups[groupName];
@@ -4013,9 +4133,10 @@ COMPARISON_TEMPLATE = r"""
         <div class="keyword-filter-section" style="padding: 8px; background: #ecf0f1; border-bottom: 1px solid #ddd;">
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <label style="font-weight: normal; color: #2c3e50; font-size: 10px;">Run Version:</label>
-                            <input type="text" id="comparison-search" placeholder="Search run versions..."
-                                   style="flex: 1; min-width: 200px; padding: 2px 6px; border: 1px solid #ccc; border-radius: 3px; font-size: 10px;">
+                            <label style="font-weight: normal; color: #2c3e50; font-size: 10px;" title="Use ',' for OR, '+' for AND. Example: PI+PD, FE+TE">Run Version:</label>
+                            <input type="text" id="comparison-search" placeholder="e.g., PI+PD, FE+TE"
+                                   style="flex: 1; min-width: 200px; padding: 2px 6px; border: 1px solid #ccc; border-radius: 3px; font-size: 10px;"
+                                   title="Use ',' for OR logic, '+' for AND logic. Examples: 'PI' | 'PI, FE' | 'PI+PD+fe00' | 'PI+PD, FE+TE'">
                         </div>
                         <div style="display: flex; align-items: center; gap: 4px;">
                             <button id="sort-toggle-btn" onclick="toggleRunVersionSort()" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px; font-size: 10px; background: white; cursor: pointer;" title="Click to toggle Run Version sort">
@@ -4023,9 +4144,10 @@ COMPARISON_TEMPLATE = r"""
                             </button>
                         </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <label for="keyword-search" style="font-weight: normal; color: #2c3e50; font-size: 10px;">Filter Keywords:</label>
-                    <input type="text" id="keyword-search" placeholder="Type to filter keywords..."
-                           style="padding: 4px 8px; border: 1px solid #bdc3c7; border-radius: 3px; font-size: 10px; width: 180px;">
+                    <label for="keyword-search" style="font-weight: normal; color: #2c3e50; font-size: 10px;" title="Use ',' for OR, '+' for AND. Example: timing, setup+worst">Filter Keywords:</label>
+                    <input type="text" id="keyword-search" placeholder="e.g., timing, setup+worst"
+                           style="padding: 4px 8px; border: 1px solid #bdc3c7; border-radius: 3px; font-size: 10px; width: 180px;"
+                           title="Use ',' for OR logic, '+' for AND logic. Examples: 'timing' | 'timing, area' | 'setup+worst' | 'setup+worst, hold+best'">
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <label for="filter-group" style="font-weight: normal; color: #2c3e50; font-size: 10px;">Group:</label>
@@ -4641,6 +4763,85 @@ COMPARISON_TEMPLATE = r"""
             }
         }
 
+        // Helper function to check if keyword matches a template-based pattern
+        function matchesTemplate(keyword, templateName) {
+            // Check if template contains variables like {mode}, {corner}, etc.
+            if (!templateName.includes('{')) {
+                return false;
+            }
+
+            // Convert template to regex pattern
+            // Replace template variables with regex patterns
+            let pattern = templateName
+                .replace(/\{mode\}/g, '[^_]+')              // mode: any non-underscore chars
+                .replace(/\{corner\}/g, '[^_]+(?:_[^_]+)*') // corner: can have underscores (e.g., ss_0p81v_m40c_Cworst_T)
+                .replace(/\{path_type\}/g, '[^_]+')         // path_type: reg2reg, all, etc.
+                .replace(/\{noise_type\}/g, '[^_]+')        // noise_type: above_low, below_high
+                .replace(/\{task_name\}/g, '[^_]+')         // task_name: place, route, etc.
+                // Escape special regex characters in the rest of the string
+                .replace(/\./g, '\\.');
+
+            // Create regex with anchors
+            const regex = new RegExp('^' + pattern + '$');
+
+            return regex.test(keyword);
+        }
+
+        // Helper function to get group order dynamically from YAML configuration
+        function getGroupOrderFromYAML() {
+            const groupSet = new Set();
+            const preferredOrder = ['err/warn', 'timing', 'congestion', 'utilization'];
+
+            // Extract all unique groups from YAML configuration
+            // Check both 'tasks' and 'task_templates' sections
+            if (keywordGroupConfig) {
+                // Check tasks section
+                if (keywordGroupConfig.tasks) {
+                    for (const taskName in keywordGroupConfig.tasks) {
+                        const task = keywordGroupConfig.tasks[taskName];
+                        if (task.keywords) {
+                            for (const keywordConfig of task.keywords) {
+                                if (keywordConfig.group) {
+                                    groupSet.add(keywordConfig.group);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Check task_templates section
+                if (keywordGroupConfig.task_templates) {
+                    for (const templateName in keywordGroupConfig.task_templates) {
+                        const template = keywordGroupConfig.task_templates[templateName];
+                        if (template.keywords) {
+                            for (const keywordConfig of template.keywords) {
+                                if (keywordConfig.group) {
+                                    groupSet.add(keywordConfig.group);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Build ordered list: preferred groups first, then remaining alphabetically
+            const groupOrder = [];
+
+            // Add preferred groups if they exist in YAML
+            preferredOrder.forEach(group => {
+                if (groupSet.has(group)) {
+                    groupOrder.push(group);
+                    groupSet.delete(group);
+                }
+            });
+
+            // Add remaining groups alphabetically
+            const remainingGroups = Array.from(groupSet).sort();
+            groupOrder.push(...remainingGroups);
+
+            return groupOrder;
+        }
+
         function groupKeywordsByConvention(keywords) {
             const groups = {};
 
@@ -4648,25 +4849,62 @@ COMPARISON_TEMPLATE = r"""
                 let groupName = 'Other Keywords';
 
                 // Get group from YAML configuration
-                if (keywordGroupConfig && keywordGroupConfig.tasks) {
-                    // Search through all tasks for this keyword
-                    for (const taskName in keywordGroupConfig.tasks) {
-                        const task = keywordGroupConfig.tasks[taskName];
-                        if (task.keywords) {
-                            for (const keywordConfig of task.keywords) {
-                                // Exact match
-                                if (keywordConfig.name === keyword && keywordConfig.group) {
-                                    groupName = keywordConfig.group;
-                                    break;
-                                }
-                                // Match derived keywords (e.g., s_tns_all from s_tns)
-                                if (keywordConfig.group && keyword.startsWith(keywordConfig.name + '_')) {
-                                    groupName = keywordConfig.group;
-                                    break;
+                // Check both 'tasks' and 'task_templates' sections
+                if (keywordGroupConfig) {
+                    // Search through tasks section
+                    if (keywordGroupConfig.tasks) {
+                        for (const taskName in keywordGroupConfig.tasks) {
+                            const task = keywordGroupConfig.tasks[taskName];
+                            if (task.keywords) {
+                                for (const keywordConfig of task.keywords) {
+                                    // Try exact match first
+                                    if (keywordConfig.name === keyword && keywordConfig.group) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                    // Try prefix match for derived keywords (e.g., s_tns_all from s_tns)
+                                    if (keywordConfig.group && !keywordConfig.name.includes('{') &&
+                                        keyword.startsWith(keywordConfig.name + '_')) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                    // Try template match for template-based keywords
+                                    if (keywordConfig.group && matchesTemplate(keyword, keywordConfig.name)) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
                                 }
                             }
+                            if (groupName !== 'Other Keywords') break;
                         }
-                        if (groupName !== 'Other Keywords') break;
+                    }
+
+                    // If not found in tasks, search through task_templates section
+                    if (groupName === 'Other Keywords' && keywordGroupConfig.task_templates) {
+                        for (const templateName in keywordGroupConfig.task_templates) {
+                            const template = keywordGroupConfig.task_templates[templateName];
+                            if (template.keywords) {
+                                for (const keywordConfig of template.keywords) {
+                                    // Try exact match first
+                                    if (keywordConfig.name === keyword && keywordConfig.group) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                    // Try prefix match for derived keywords (e.g., s_tns_all from s_tns)
+                                    if (keywordConfig.group && !keywordConfig.name.includes('{') &&
+                                        keyword.startsWith(keywordConfig.name + '_')) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                    // Try template match for template-based keywords
+                                    if (keywordConfig.group && matchesTemplate(keyword, keywordConfig.name)) {
+                                        groupName = keywordConfig.group;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (groupName !== 'Other Keywords') break;
+                        }
                     }
                 }
 
@@ -4681,18 +4919,18 @@ COMPARISON_TEMPLATE = r"""
                 groups[group].sort();
             });
 
-            // Sort groups by name (YAML-defined groups first, then Other Keywords)
+            // Sort groups - dynamically extract order from vista_casino.yaml
             const sortedGroups = {};
-            const groupOrder = ['err/warn', 'timing', 'utilization', 'congestion', 'drc'];
+            const groupOrder = getGroupOrderFromYAML();
 
-            // Add known groups in order
+            // Add groups in YAML-defined order
             groupOrder.forEach(groupName => {
                 if (groups[groupName]) {
                     sortedGroups[groupName] = groups[groupName];
                 }
             });
 
-            // Add any additional groups found in YAML (not in predefined order)
+            // Add any additional groups found in data but not in YAML (shouldn't happen but be safe)
             Object.keys(groups).sort().forEach(groupName => {
                 if (!groupOrder.includes(groupName) && groupName !== 'Other Keywords') {
                     sortedGroups[groupName] = groups[groupName];
@@ -4775,16 +5013,39 @@ COMPARISON_TEMPLATE = r"""
         }
 
         function applyKeywordFilters() {
-            const searchTerm = document.getElementById('keyword-search').value.toLowerCase();
+            const searchTerm = document.getElementById('keyword-search').value.toLowerCase().trim();
 
             // Start with all keywords
             let filtered = [...comparisonData.keywords];
 
-            // Apply text search filter
+            // Apply text search filter with AND/OR logic (like dashboard.py show_specific_keyword_columns)
             if (searchTerm) {
-                filtered = filtered.filter(keyword =>
-                    keyword.toLowerCase().includes(searchTerm)
-                );
+                // Parse filter text for mixed AND/OR logic
+                // Split by comma first (OR groups)
+                const orGroups = searchTerm.split(',')
+                    .map(group => group.trim())
+                    .filter(group => group.length > 0);
+
+                filtered = filtered.filter(keyword => {
+                    const keywordLower = keyword.toLowerCase();
+
+                    // Check if keyword matches ANY of the OR groups
+                    return orGroups.some(orGroup => {
+                        // Within each OR group, check for AND logic ('+' separator)
+                        if (orGroup.includes('+')) {
+                            // AND logic: keyword must contain ALL terms in this group
+                            const andTerms = orGroup.split('+')
+                                .map(term => term.trim())
+                                .filter(term => term.length > 0);
+
+                            // Keyword must contain ALL AND terms
+                            return andTerms.every(term => keywordLower.includes(term));
+                        } else {
+                            // Simple term: keyword must contain this term
+                            return keywordLower.includes(orGroup);
+                        }
+                    });
+                });
             }
 
             // Apply group filter (multiple groups can be selected)
@@ -4806,8 +5067,46 @@ COMPARISON_TEMPLATE = r"""
             renderComparison();
         }
 
+        /**
+         * Helper function to match text against filter expression with AND/OR logic
+         * @param {string} text - Text to match against
+         * @param {string} filterExpression - Filter expression with AND/OR logic
+         * @returns {boolean} - True if text matches the filter expression
+         */
+        function matchesFilterExpression(text, filterExpression) {
+            if (!filterExpression || !text) {
+                return true;
+            }
+
+            const textLower = text.toLowerCase();
+            const filterLower = filterExpression.toLowerCase().trim();
+
+            // Parse filter text for mixed AND/OR logic
+            // Split by comma first (OR groups)
+            const orGroups = filterLower.split(',')
+                .map(group => group.trim())
+                .filter(group => group.length > 0);
+
+            // Check if text matches ANY of the OR groups
+            return orGroups.some(orGroup => {
+                // Within each OR group, check for AND logic ('+' separator)
+                if (orGroup.includes('+')) {
+                    // AND logic: text must contain ALL terms in this group
+                    const andTerms = orGroup.split('+')
+                        .map(term => term.trim())
+                        .filter(term => term.length > 0);
+
+                    // Text must contain ALL AND terms
+                    return andTerms.every(term => textLower.includes(term));
+                } else {
+                    // Simple term: text must contain this term
+                    return textLower.includes(orGroup);
+                }
+            });
+        }
+
         function filterComparisonData() {
-            const searchTerm = document.getElementById('comparison-search').value.toLowerCase().trim();
+            const searchTerm = document.getElementById('comparison-search').value.trim();
 
             if (!searchTerm) {
                 // If no search term, reset to original data
@@ -4820,12 +5119,12 @@ COMPARISON_TEMPLATE = r"""
                 return;
             }
 
-            // Filter runs based on run version only
+            // Filter runs based on run version with AND/OR logic
             if (window.originalComparisonData) {
                 const filteredRuns = window.originalComparisonData.runs.filter(run => {
                     // Safely check run_version (handle null/undefined)
                     const runVersion = run.run_version || '';
-                    return runVersion.toLowerCase().includes(searchTerm);
+                    return matchesFilterExpression(runVersion, searchTerm);
                 });
 
                 console.log('Run Version Filter:', searchTerm);
@@ -4862,12 +5161,12 @@ COMPARISON_TEMPLATE = r"""
             if (window.originalComparisonData && comparisonData) {
                 let sortedRuns = [...window.originalComparisonData.runs];
 
-                // Apply search filter first
-                const searchTerm = document.getElementById('comparison-search').value.toLowerCase().trim();
+                // Apply search filter first with AND/OR logic
+                const searchTerm = document.getElementById('comparison-search').value.trim();
                 if (searchTerm) {
                     sortedRuns = sortedRuns.filter(run => {
                         const runVersion = run.run_version || '';
-                        return runVersion.toLowerCase().includes(searchTerm);
+                        return matchesFilterExpression(runVersion, searchTerm);
                     });
                 }
 
