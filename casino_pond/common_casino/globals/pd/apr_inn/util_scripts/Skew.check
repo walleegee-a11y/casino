@@ -1,0 +1,20 @@
+set OF [open Skew.rpt w]
+
+puts $OF "Group | Long_Latency | Short_Latency | Skew | Active_sink | All_sink"
+foreach group [get_db skew_groups .name] {
+
+	set name $group
+	set LL [get_ccopt_skew_group_delay -skew_group $group -delay_corner $cts_primary_delay_corner -longest]
+	set LS [get_ccopt_skew_group_delay -skew_group $group -delay_corner $cts_primary_delay_corner -shortest]
+	set sink [llength [get_db [get_db skew_groups $group] .sinks]]
+	set sink_active [llength [get_db [get_db skew_groups $group] .sinks_active]]
+	set skew [expr $LL-$LS]
+	
+	puts $OF "$name | $LL | $LS | $skew | ${sink_active} | ${sink}"
+
+}
+
+close $OF
+ 
+
+	

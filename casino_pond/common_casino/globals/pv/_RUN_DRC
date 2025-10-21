@@ -1,0 +1,70 @@
+#! /bin/csh -f
+
+
+
+set current_path = `pwd`
+set tag_inn = `echo $current_path | awk -F/ '{print $(NF-3)}'`
+set run_inn = `echo $current_path | awk -F/ '{print $(NF-1)}'`
+set top_name = `echo $current_path | awk -F/ '{print $(NF-4)}'`
+set base_path = `echo $current_path | awk -F "/works_" '{print $1}'`
+set DK_VER = "dc-0.0_dk-0.0_tag-0.0"
+set pnr_gds = ${top_name}.gds.gz
+set MPnet = ${top_name}.lvs.v.gz
+set outfeedDirName = "${base_path}/outfeeds/${top_name}/${tag_inn}/${run_inn}"
+set ref_gds_path = "$base_path/db/vers/${DK_VER}/*/gds_oas"
+set ref_cdl_path = "$base_path/db/vers/${DK_VER}/*/cdl"
+set ref_pdk_path = "$base_path/db/vers/${DK_VER}/pdk/calibre_runset"
+
+
+#set PVRUN  = `pwd`
+#set top_name =  `echo $PVRUN | awk -F'/' '{print $7}'`
+#set base_path = `echo $PVRUN | awk -F'/' '{print "/"$2"/"$3"/"$4"/"$5}'`
+#set tag_inn =   `echo $PVRUN | awk -F'/' '{print $8}'`
+#set run_inn =   `echo $PVRUN | awk -F'/' '{print $10}'`
+#set DK_VER = "dc-0.0_dk-0.0_tag-0.0"
+#set pnr_gds = ${top_name}.gds.gz
+#set MPnet = ${top_name}.lvs.v.gz
+#set outfeedDirName = "${base_path}/outfeeds/${top_name}/${tag_inn}/${run_inn}"
+#set ref_gds_path = "$base_path/db/vers/${DK_VER}/*/gds_oas"
+#set ref_cdl_path = "$base_path/db/vers/${DK_VER}/*/cdl"
+#set ref_pdk_path = "$base_path/db/vers/${DK_VER}/pdk/calibre_runset"
+
+
+echo "top_name      $top_name"
+echo "base_path     $base_path"
+echo "tag_inn       $tag_inn"
+echo "run_inn       $run_inn"
+echo "DK_VER        $DK_VER"
+echo "pnr_gds       $pnr_gds"
+echo "MPnet         $MPnet"
+echo "outfeedDirName$outfeedDirName"
+echo "ref_gds_path  $ref_gds_path"
+echo "ref_cdl_path  $ref_cdl_path"
+echo "ref_pdk_path  $ref_pdk_path"
+
+
+
+
+#--------------------------------------------------------------------------------Copy RULE Script
+    mkdir -p 03_DRC
+    cp -rf ${ref_pdk_path}/DRC/* 03_DRC
+#------------------------------------------------------------------------------------------------
+
+
+#--------------------------------------------------------------------------------Go PV
+    cd 03_DRC
+#------------------------------------------------------------------------------------------------
+
+
+#--------------------------------------------------------------------------------Update Rule Deck ENV
+sed -i 's@LAYOUT PATH.*@LAYOUT PATH "../00_GDS/merged_'${pnr_gds}'"@g' G-DF-EHV40N-1.1V_6V_+-16V-LP-1P9M0T0H2A-CALIBRE-DRC-A.D_PB
+sed -i 's@LAYOUT PRIMARY.*@LAYOUT PRIMARY "'${top_name}'"@g' G-DF-EHV40N-1.1V_6V_+-16V-LP-1P9M0T0H2A-CALIBRE-DRC-A.D_PB
+#------------------------------------------------------------------------------------------
+
+
+#---------------------------------------------------------------------------------Excute Run
+source :run
+#------------------------------------------------------------------------------------------
+
+
+exit
