@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CASINO Hawkeye Analysis Dashboard - Comparison View</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/comparison.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Hawkeye Comparison Analysis</h1>
+            <p id="comparison-description">Comparison View - Loading...</p>
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-content">
+                    <span class="stat-label">Runs</span> : <span class="stat-number" id="runs-count">-</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-content">
+                    <span class="stat-label">Keywords</span> : <span class="stat-number" id="keywords-count">-</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-content">
+                    <span class="stat-label">Data Points</span> : <span class="stat-number" id="data-points">-</span>
+                </div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-content">
+                    <span class="stat-label">View Mode</span> : <span class="stat-number" id="view-type">Normal</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="view-mode-badge" id="view-mode-indicator" style="
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            background: #3498db;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 11px;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            z-index: 9998;
+            display: none;
+        ">
+            <span id="mode-text">NORMAL VIEW</span>
+        </div>
+
+        <div class="tabs">
+
+        <div class="controls">
+
+            <button class="btn btn-warning" onclick="toggleView()" id="toggle-btn">
+                Switch to Normal View
+            </button>
+            <button class="btn btn-secondary" onclick="resetColumnOrder()">
+                Reset Column Order
+            </button>
+
+            <button class="btn btn-info" onclick="toggleEmptyRowsAndColumns()" id="hide-empty-btn">
+                Hide Empty Rows and Columns
+            </button>
+            <button class="btn btn-success" onclick="exportComparison()">
+                Export CSV
+            </button>
+
+            <button class="btn btn-secondary" onclick="window.close()">
+                Close Window
+            </button>
+            <div class="view-info" id="view-info">
+                Loading comparison data...
+            </div>
+        </div>
+
+        <div class="keyword-filter-section" style="padding: 8px; background: #ecf0f1; border-bottom: 1px solid #ddd;">
+                    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                        <div style="display: flex; align-items: center; gap: 8px;">
+                            <label style="font-weight: normal; color: #2c3e50; font-size: 10px;" title="Use ',' for OR, '+' for AND. Example: PI+PD, FE+TE">Run Version:</label>
+                            <input type="text" id="comparison-search" placeholder="e.g., PI+PD, FE+TE"
+                                   style="flex: 1; min-width: 200px; padding: 2px 6px; border: 1px solid #ccc; border-radius: 3px; font-size: 10px;"
+                                   title="Use ',' for OR logic, '+' for AND logic. Examples: 'PI' | 'PI, FE' | 'PI+PD+fe00' | 'PI+PD, FE+TE'">
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
+                            <button id="sort-toggle-btn" onclick="toggleRunVersionSort()" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px; font-size: 10px; background: white; cursor: pointer;" title="Click to toggle Run Version sort">
+                                Run Version: A -> Z
+                            </button>
+                        </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label for="keyword-search" style="font-weight: normal; color: #2c3e50; font-size: 10px;" title="Use ',' for OR, '+' for AND. Example: timing, setup+worst">Filter Keywords:</label>
+                    <input type="text" id="keyword-search" placeholder="e.g., timing, setup+worst"
+                           style="padding: 4px 8px; border: 1px solid #bdc3c7; border-radius: 3px; font-size: 10px; width: 180px;"
+                           title="Use ',' for OR logic, '+' for AND logic. Examples: 'timing' | 'timing, area' | 'setup+worst' | 'setup+worst, hold+best'">
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label for="filter-group" style="font-weight: normal; color: #2c3e50; font-size: 10px;">Group:</label>
+                    <div class="filter-dropdown" style="min-width: 200px;">
+                        <button class="filter-button" onclick="toggleFilterDropdown('group')" id="filter-group-btn">
+                            All Groups
+                        </button>
+                        <div class="filter-dropdown-content" id="group-dropdown">
+                            <input type="text" class="filter-search" placeholder="Search groups..." onkeyup="filterDropdownItems('group')">
+                            <div id="group-options"></div>
+                            <div class="filter-actions">
+                                <button type="button" onclick="selectAllFilterOptions('group')" class="select-all">Select All</button>
+                                <button type="button" onclick="clearAllFilterOptions('group')" class="clear-all">Clear All</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label for="task-filter" style="font-weight: normal; color: #2c3e50; font-size: 10px;">Task:</label>
+                    <div class="filter-dropdown" style="min-width: 200px;">
+                        <button class="filter-button" onclick="toggleFilterDropdown('task')" id="filter-task-btn">
+                            All Tasks
+                        </button>
+                        <div class="filter-dropdown-content" id="task-dropdown">
+                            <input type="text" class="filter-search" placeholder="Search tasks..." onkeyup="filterDropdownItems('task')">
+                            <div id="task-options"></div>
+                            <div class="filter-actions">
+                                <button type="button" onclick="selectAllTaskOptions()" class="select-all">Select All</button>
+                                <button type="button" onclick="clearAllTaskOptions()" class="clear-all">Clear All</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-secondary" onclick="clearKeywordFilters()" style="padding: 4px 8px; font-size: 10px;">
+                    Clear Filters
+                </button>
+                <div style="margin-left: auto; color: #666; font-size: 10px;">
+                    <span id="filtered-keywords-count">-</span> keywords shown |
+                    <span id="filtered-tasks-count">-</span> tasks shown
+                </div>
+            </div>
+        </div>
+
+        <div class="comparison-table">
+            <div id="loading" class="loading">Loading comparison data...</div>
+            <div id="comparison-content" style="display: none;"></div>
+        </div>
+    </div>
+
+    <!-- JavaScript files in dependency order -->
+    <!-- 1. utils.js - Common utility functions (no dependencies) -->
+    <script src="/static/js/utils.js"></script>
+
+    <!-- 2. grouping.js - Keyword/task grouping (depends on utils.js) -->
+    <script src="/static/js/grouping.js"></script>
+
+    <!-- 3. sorting.js - Sorting logic (depends on utils.js for matchesFilterExpression) -->
+    <script src="/static/js/sorting.js"></script>
+
+    <!-- 4. filters.js - All filtering logic (depends on utils.js, grouping.js, sorting.js) -->
+    <script src="/static/js/filters.js"></script>
+
+    <!-- 5. comparison.js - Main comparison view (depends on all above) -->
+    <script src="/static/js/comparison.js"></script>
+
+</body>
+</html>

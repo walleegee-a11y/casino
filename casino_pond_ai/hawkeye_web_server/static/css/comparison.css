@@ -1,0 +1,358 @@
+/* Comparison View Specific CSS */
+
+/* Column resize cursor */
+th {
+    position: relative;
+    user-select: none;
+}
+
+.resize-handle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 1px;
+    height: 100%;
+    cursor: col-resize;
+    z-index: 100;
+    background: transparent;
+}
+
+.resize-handle:hover {
+    background: rgba(52, 152, 219, 0.8);
+}
+
+.resize-handle::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: 15%;
+    bottom: 15%;
+    width: 1px;
+    background: rgba(52, 152, 219, 0.6);
+}
+
+.resize-handle:hover::after {
+    background: rgba(52, 152, 219, 1);
+}
+
+.resizing {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+/* Controls */
+.controls {
+    padding: 6px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #ddd;
+    display: flex;
+    gap: 4px;
+    position: sticky;
+    top: 0;
+    z-index: 9999;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* Button Variants */
+.btn-warning {
+    background: #f39c12;
+    border-color: #f39c12;
+}
+
+.btn-warning:hover {
+    background: #e67e22;
+}
+
+.btn-info {
+    background: #17a2b8;
+    border-color: #17a2b8;
+}
+
+.btn-info:hover {
+    background: #138496;
+}
+
+/* Filter system styles - matching main dashboard */
+.filter-dropdown-content {
+    max-height: 400px;
+}
+
+.filter-dropdown-content .filter-actions button:hover {
+    color: #2980b9;
+}
+
+.filter-dropdown-content .filter-actions button.select-all {
+    color: #27ae60;
+}
+
+.filter-dropdown-content .filter-actions button.select-all:hover {
+    color: #229954;
+}
+
+.filter-dropdown-content .filter-actions button.clear-all {
+    color: #e74c3c;
+}
+
+.filter-dropdown-content .filter-actions button.clear-all:hover {
+    color: #c0392b;
+}
+
+.filter-button {
+    background: white;
+    border: 1px solid #ecf0f1;
+    border-radius: 3px;
+    padding: 2px 6px;
+    cursor: pointer;
+    font-size: 10px;
+    width: 100%;
+    text-align: left;
+    position: relative;
+    transition: all 0.3s ease;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+}
+
+.filter-button:hover {
+    border-color: #3498db;
+    background-color: #f8f9fa;
+}
+
+.filter-button::after {
+    content: 'v';
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 10px;
+    color: #7f8c8d;
+    transition: transform 0.3s ease;
+}
+
+.filter-button.active::after {
+    transform: translateY(-50%) rotate(180deg);
+}
+
+.filter-button.has-filters {
+    background-color: #e8f4fd;
+    border-color: #3498db;
+    color: #2980b9;
+}
+
+.filter-button.has-filters::after {
+    content: 'v';
+    color: #3498db;
+}
+
+/* Comparison Table */
+.comparison-table {
+    overflow-x: auto;
+    overflow-y: auto;
+    margin-top: 0;
+    position: relative;
+    max-height: calc(100vh - 100px);
+    border: 3px solid #000;
+    background: white;
+    isolation: isolate;
+}
+
+table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: white;
+    border: none;
+    margin-bottom: 0;
+    position: relative;
+}
+
+th, td {
+    padding: 1px 2px;
+    text-align: left;
+    border: none;
+    border-right: 1px solid #f5f5f5;
+    border-bottom: 1px solid #f5f5f5;
+    font-size: 10px;
+    line-height: 1.0;
+    overflow: hidden;
+    position: relative;
+    height: auto;
+    min-height: 12px;
+}
+
+th {
+    background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+    color: white;
+    font-weight: normal;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    padding: 2px 4px;
+    border: 1px solid #555;
+    border-right: 1px solid rgba(255,255,255,0.1);
+}
+
+/* Sticky column headers */
+th[style*="position: sticky"][style*="left"] {
+    z-index: 30 !important;
+    background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+    border: 1px solid #555;
+}
+
+tbody tr {
+    position: relative;
+    z-index: 1;
+}
+
+.sticky-column {
+    position: sticky;
+    left: 0;
+    background: #f8f9fa;
+    z-index: 20;
+    font-weight: normal;
+    border-right: 2px solid #555 !important;
+}
+
+.sticky-column th {
+    background: #34495e;
+    z-index: 30;
+    border: 1px solid #555;
+}
+
+.sticky-column::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 2px;
+    background: linear-gradient(to bottom,
+        rgba(52, 152, 219, 0) 0%,
+        rgba(52, 152, 219, 0.3) 20%,
+        rgba(52, 152, 219, 0.5) 50%,
+        rgba(52, 152, 219, 0.3) 80%,
+        rgba(52, 152, 219, 0) 100%
+    );
+    box-shadow: 2px 0 4px rgba(0,0,0,0.1);
+}
+
+td:not(.sticky-column):not([colspan]):hover {
+    background: #fff3cd !important;
+    cursor: auto;
+    position: relative;
+    box-shadow: inset 0 0 0 0.5px #ffc107;
+}
+
+/* Info Panel */
+.info-panel {
+    background: #e8f4fd;
+    border: 1px solid #3498db;
+    border-radius: 4px;
+    padding: 15px;
+    margin: 20px;
+}
+
+.info-panel h3 {
+    color: #2c3e50;
+    margin-bottom: 10px;
+    font-size: 10px;
+}
+
+.info-panel p {
+    margin: 5px 0;
+    color: #34495e;
+    font-size: 10px;
+}
+
+/* Column Dragging */
+.column-drag-handle {
+    cursor: move;
+    color: #666;
+    margin-left: 8px;
+    font-size: 10px;
+}
+
+th[draggable="true"] {
+    cursor: move;
+}
+
+th[draggable="true"]:hover {
+    background: #2c3e50;
+}
+
+.rotated-header {
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    min-height: 120px;
+    text-align: center;
+}
+
+.rotated-header .column-drag-handle {
+    transform: rotate(90deg);
+    margin-top: 10px;
+}
+
+/* View Info */
+.view-info {
+    margin-left: auto;
+    color: #666;
+    font-size: 10px;
+    background: #ecf0f1;
+    padding: 2px 6px;
+    border-radius: 4px;
+    border: 1px solid #bdc3c7;
+}
+
+/* Stats Grid */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
+    gap: 2px;
+    padding: 4px;
+    background: #f8f9fa;
+    border-bottom: 1px solid #ddd;
+}
+
+.stat-card {
+    background: white;
+    padding: 2px;
+    border: 1px solid #ddd;
+    text-align: center;
+    line-height: 1.0;
+}
+
+.stat-card:hover {
+    background: #f9f9f9;
+}
+
+.stat-number {
+    font-size: 10px;
+    font-weight: normal;
+    color: #2c3e50;
+    margin-bottom: 0;
+}
+
+.stat-label {
+    font-size: 10px;
+    color: #7f8c8d;
+}
+
+/* Sort Indicator */
+.sort-indicator {
+    font-size: 10px;
+    opacity: 0.6;
+    margin-left: 4px;
+    font-family: monospace;
+}
+
+th:hover .sort-indicator {
+    opacity: 1;
+}
+
+.sort-asc .sort-indicator::after {
+    content: ' ^';
+}
+
+.sort-desc .sort-indicator::after {
+    content: ' v';
+}

@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hawkeye - Select Project</title>
+    <link rel="stylesheet" href="/static/css/common.css">
+    <link rel="stylesheet" href="/static/css/project_selector.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>? Hawkeye Analysis Dashboard</h1>
+            <p>Select a project to analyze</p>
+        </div>
+
+        <div class="content">
+            {% if projects %}
+            <div class="projects-grid">
+                {% for project in projects %}
+                <div class="project-card {% if not project.has_archive %}no-archive{% endif %}"
+                     {% if project.has_archive %}onclick="selectProject('{{ project.name }}')"{% endif %}>
+
+                    <div class="project-info">
+                        <div class="project-name">{{ project.name }}</div>
+                        <div class="project-stats">
+                            {% if project.has_archive %}
+                                <div class="stat-item">
+                                    <span class="stat-label">Runs:</span>
+                                    <span class="stat-value">{{ project.run_count }}</span>
+                                </div>
+                                {% if project.last_updated %}
+                                <div class="stat-item">
+                                    <span class="stat-label">Updated:</span>
+                                    <span class="stat-value">{{ project.last_updated[:10] }}</span>
+                                </div>
+                                {% endif %}
+                            {% else %}
+                                <span style="color: #856404; font-size: 0.9em;">No archive available</span>
+                            {% endif %}
+                        </div>
+                    </div>
+
+                    {% if project.has_archive %}
+                        <span class="badge badge-success">Archive Available</span>
+                    {% else %}
+                        <span class="badge badge-warning">No Archive</span>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="no-projects">
+                <p>No projects found in {{ casino_prj_base }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+    </div>
+    <script src="/static/js/project_selector.js"></script>
+</body>
+</html>
