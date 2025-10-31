@@ -102,13 +102,27 @@ class FileAnalyzer:
 
 
 
-            if target_file and os.path.exists(target_file):
-                try:
-                    content = FileAnalyzer.read_file_content(target_file)
-                    return FileAnalyzer._extract_from_content(
-                        content, pattern, data_type, keyword_name, specific_file, keyword_config)
-                except Exception as e:
-                    print(f"      Error reading specific file {target_file}: {e}")
+            if target_file:
+                # Check if file exists (handles symlinks correctly)
+                if os.path.lexists(target_file):
+                    # If it's a symlink, verify target is accessible
+                    if os.path.islink(target_file):
+                        if not os.path.exists(target_file):
+                            print(f"      Broken symlink: {target_file} -> {os.readlink(target_file)}")
+                            return None
+                    elif not os.path.exists(target_file):
+                        print(f"      File does not exist: {target_file}")
+                        return None
+
+                    try:
+                        content = FileAnalyzer.read_file_content(target_file)
+                        return FileAnalyzer._extract_from_content(
+                            content, pattern, data_type, keyword_name, specific_file, keyword_config)
+                    except Exception as e:
+                        print(f"      Error reading specific file {target_file}: {e}")
+                        return None
+                else:
+                    print(f"      File not found: {target_file}")
                     return None
             else:
                 print(f"      Specific file {specific_file} not found in available files")
@@ -163,7 +177,7 @@ class FileAnalyzer:
         elif data_type == 'status':
             return FileAnalyzer._extract_status(content, pattern)
         else:
-            return FileAnalyzer._extract_string(content, pattern)
+            return FileAnalyzer._extract_string(content, pattern, keyword_config)
 
     @staticmethod
     def _extract_sta_violation_worst(content: str, pattern: str, keyword_config: dict) -> Optional[float]:
@@ -884,11 +898,26 @@ class FileAnalyzer:
         return None
 
     @staticmethod
-    def _extract_string(content: str, pattern: str) -> Optional[str]:
-        """Extract string value"""
+    def _extract_string(content: str, pattern: str, keyword_config: dict = None) -> Optional[str]:
+        """Extract string value
+
+        Args:
+            content: File content to search
+            pattern: Regex pattern to match
+            keyword_config: Keyword configuration dict (contains search_from_top flag)
+
+        Returns:
+            Extracted string value or None
+        """
         all_matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
         if all_matches:
-            match = all_matches[-1]
+            # Check if we should search from top (first match) or bottom (last match)
+            search_from_top = False
+            if keyword_config and isinstance(keyword_config, dict):
+                search_from_top = keyword_config.get('search_from_top', False)
+
+            # Select first match if search_from_top, otherwise last match
+            match = all_matches[0] if search_from_top else all_matches[-1]
             value = match.group(1) if match.groups() else match.group(0)
             return value
         return None

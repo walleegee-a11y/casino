@@ -56,7 +56,7 @@ endif
 
 #--------------------------------------------------------------------------------Update file variable
 sed -i 's@LEF_FILE:.*@LEF_FILE: '${outfeedDirName}'/lef/'${top_name}'_tech.lef '${outfeedDirName}'/lef/'${top_name}'_allLefLibrary.lef@g' star.cmd
-sed -i 's@DEF_FILE:.*@DEF_FILE: '${outfeedDirName}'/def/'${top_name}'.def.gz@g' star.cmd
+sed -i 's@TOP_DEF_FILE:.*@TOP_DEF_FILE: '${outfeedDirName}'/def/'${top_name}'.def.gz@g' star.cmd
 sed -i 's@NETLIST_FILE:.*@NETLIST_FILE: '${outfeedDirName}'/spef/'${top_name}'.spef.gz@g' star.cmd
 #------------------------------------------------------------------------------------------------
 

@@ -1,5 +1,22 @@
 # Treem Casino Performance Optimization - Implementation Summary
 
+## Error after modifying
+```
+Traceback (most recent call last):
+  File "/mnt/data/prjs/ANA6716/casino_pond/casino_gui.py", line 31, in <module>
+    from treem_casino.ui.main_window import MainWindow
+  File "/mnt/data/prjs/ANA6716/casino_released/30_20250929/casino_pond/treem_casino/ui/main_window.py", line 22, in <module>
+    from ..services.directory_service import DirectoryService
+  File "/mnt/data/prjs/ANA6716/casino_released/30_20250929/casino_pond/treem_casino/services/__init__.py", line 1, in <module>
+    from .directory_service import DirectoryService
+  File "/mnt/data/prjs/ANA6716/casino_released/30_20250929/casino_pond/treem_casino/services/directory_service.py", line 201, in <module>
+    class DirectoryService(QObject):
+  File "/mnt/data/prjs/ANA6716/casino_released/30_20250929/casino_pond/treem_casino/services/directory_service.py", line 373, in DirectoryService
+    def scan_files_for_operation(self, base_path: Path, operation: str = "clone") -> Dict[str, Any]:
+                                                                                               ^^^
+NameError: name 'Any' is not defined. Did you mean: 'any'?
+```
+
 ## ✅ Completed Enhancements
 
 All performance enhancements have been successfully implemented! Here's what was done:

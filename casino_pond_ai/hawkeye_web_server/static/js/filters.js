@@ -81,41 +81,25 @@ function initializeFilters() {
 
 /**
  * Apply keyword filters based on search term and group selection
+ * Uses matchesFilterExpression() from utils.js for consistent AND/OR/NOT logic
  */
 function applyKeywordFilters() {
-    const searchTerm = document.getElementById('keyword-search').value.toLowerCase().trim();
+    const searchTerm = document.getElementById('keyword-search').value.trim();
 
     // Start with all keywords
     let filtered = [...comparisonData.keywords];
 
-    // Apply text search filter with AND/OR logic (like dashboard.py show_specific_keyword_columns)
+    // Apply text search filter with AND/OR/NOT logic using matchesFilterExpression()
+    // This ensures consistent behavior with "Run Version" filter
     if (searchTerm) {
-        // Parse filter text for mixed AND/OR logic
-        // Split by comma first (OR groups)
-        const orGroups = searchTerm.split(',')
-            .map(group => group.trim())
-            .filter(group => group.length > 0);
-
         filtered = filtered.filter(keyword => {
-            const keywordLower = keyword.toLowerCase();
-
-            // Check if keyword matches ANY of the OR groups
-            return orGroups.some(orGroup => {
-                // Within each OR group, check for AND logic ('+' separator)
-                if (orGroup.includes('+')) {
-                    // AND logic: keyword must contain ALL terms in this group
-                    const andTerms = orGroup.split('+')
-                        .map(term => term.trim())
-                        .filter(term => term.length > 0);
-
-                    // Keyword must contain ALL AND terms
-                    return andTerms.every(term => keywordLower.includes(term));
-                } else {
-                    // Simple term: keyword must contain this term
-                    return keywordLower.includes(orGroup);
-                }
-            });
+            // Use the centralized filter function from utils.js
+            // This supports: OR (,), AND (+), NOT (! or -)
+            return matchesFilterExpression(keyword, searchTerm);
         });
+
+        console.log('Keyword Filter:', searchTerm);
+        console.log('Filtered keywords count:', filtered.length);
     }
 
     // Apply group filter (multiple groups can be selected)

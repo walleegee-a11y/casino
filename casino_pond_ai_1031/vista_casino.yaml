@@ -1,0 +1,549 @@
+# Project-wide settings
+project:
+  name: "CASINO Project Dashboard"
+  description: "Interactive analysis dashboard for CASINO project runs"
+
+# Job descriptions and configurations
+jobs:
+  syn_dc:
+    description: "SYN"
+    tasks: ["syn_dc"]
+
+  dft:
+    description: "DFT"
+    tasks: ["dft"]
+
+  lec_fm:
+    description: "LEC"
+    tasks: ["lec_fm"]
+
+  sta_pt:
+    description: "PrimeTime Static Timing Analysis - Timing verification and analysis"
+    tasks: ["sta_pt"]
+
+  ldrc_dc:
+    description: "LDRC"
+    tasks: ["ldrc_dc"]
+
+  sim:
+    description: "SIM"
+    tasks: ["sim"]
+
+  apr_inn:
+    description: "Innovus APR (Automatic Place and Route) - Complete physical design flow"
+    #tasks: ["manual_inn", "init_inn", "place_inn", "cts_inn", "postcts_inn", "route_inn", "postroute_inn", "chipfinish_inn", "eco_inn"]
+    tasks: ["init_inn", "place_inn", "cts_inn", "postcts_inn", "route_inn", "postroute_inn", "chipfinish_inn"]
+
+  apr_icc2:
+    description: "ICC2 APR (Automatic Place and Route) - Complete physical design flow"
+    tasks: ["init_icc2", "place_icc2", "cts_icc2", "postcts_icc2", "route_icc2", "postroute_icc2", "chipfinish_icc2"]
+
+  pex:
+    description: "PEX"
+    tasks: ["pex"]
+
+  pv:
+    description: "Physical Verification"
+    #tasks: ["GDS", "V2LVS", "DUMMY", "DRC", "LVS", "ANT", "ESD", "LATCH", "DSR", "RTO", "LVL"]
+    tasks: ["DRC", "LVS"]
+
+  psi:
+    description: "PSI"
+    tasks: ["static", "dynamic", "sigem"]
+
+  bump:
+    description: "BUMP"
+    tasks: ["bump"]
+
+
+# STA Configuration - User-defined modes and corners
+sta_config:
+  modes:
+    - "misn"
+    - "scap"
+    - "ssft"
+
+#  corners:
+#    - "ff_0p99v_m40c_Cbest"
+#    - "ff_0p99v_m40c_Cworst"
+#    - "ff_0p99v_m40c_Rcbest"
+#    - "ff_0p99v_m40c_Rcworst"
+#    - "ff_0p99v_p125c_Cbest"
+#    - "ff_0p99v_p125c_Cworst"
+#    - "ff_0p99v_p125c_Rcbest"
+#    - "ff_0p99v_p125c_Rcworst"
+#    - "ss_0p81v_m40c_Cworst"
+#    - "ss_0p81v_m40c_Cworst_T"
+#    - "ss_0p81v_m40c_Rcworst"
+#    - "ss_0p81v_m40c_Rcworst_T"
+#    - "ss_0p81v_p125c_Cworst"
+#    - "ss_0p81v_p125c_Cworst_T"
+#    - "ss_0p81v_p125c_Rcworst"
+#    - "ss_0p81v_p125c_Rcworst_T"
+
+  #corners:
+    #- "ff_0p99v_m40c_Cbest"
+    #- "ss_0p81v_m40c_Cworst_T"
+
+  corners:
+    - "ff_0p99v_m40c_Cbest"
+    - "ff_0p99v_m40c_Rcworst"
+    - "ff_0p99v_p125c_Cbest"
+    - "ff_0p99v_p125c_Rcworst"
+    - "ss_0p81v_m40c_Cworst"
+    - "ss_0p81v_m40c_Cworst_T"
+    - "ss_0p81v_m40c_Rcworst_T"
+    - "ss_0p81v_p125c_Rcworst"
+    - "ss_0p81v_p125c_Rcworst_T"
+
+# Template definitions (will be expanded by Python code)
+task_templates:
+
+  # STA template for PrimeTime
+  sta_primetime_task: &sta_primetime_task
+    description: "PrimeTime Static Timing Analysis"
+    log_files:
+      - "{mode}/{corner}/logs/sta_pt.log"
+    report_files:
+      - "{mode}/{corner}/reports/global_timing.path.rpt"
+      - "{mode}/{corner}/reports/all_violators.max_transition.rpt"
+      - "{mode}/{corner}/reports/all_violators.max_capacitance.rpt"
+      - "{mode}/{corner}/reports/gnoise_viols_{corner}.rpt"
+    keywords:
+      # Keyword templates with placeholders - will be expanded for each mode/corner/metric/path_type
+      # Setup timing - WNS
+      - name: "{mode}_{corner}_s_wns_{path_type}"
+        group: "sta_timing"
+        pattern: "WNS\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
+        type: "sta_timing_row"
+        unit: "ns"
+        file_name: "{mode}/{corner}/reports/global_timing.path.rpt"
+        path_type: "{path_type_pattern}"
+        timing_type: "setup"
+      # Setup timing - TNS
+      - name: "{mode}_{corner}_s_tns_{path_type}"
+        group: "sta_timing"
+        pattern: "TNS\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
+        type: "sta_timing_row"
+        unit: "ns"
+        file_name: "{mode}/{corner}/reports/global_timing.path.rpt"
+        path_type: "{path_type_pattern}"
+        timing_type: "setup"
+      # Setup timing - NUM
+      - name: "{mode}_{corner}_s_num_{path_type}"
+        group: "sta_timing"
+        pattern: "NUM\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
+        type: "sta_timing_row"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/global_timing.path.rpt"
+        path_type: "{path_type_pattern}"
+        timing_type: "setup"
+      # Hold timing - WNS
+      - name: "{mode}_{corner}_h_wns_{path_type}"
+        group: "sta_timing"
+        pattern: "WNS\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
+        type: "sta_timing_row"
+        unit: "ns"
+        file_name: "{mode}/{corner}/reports/global_timing.path.rpt"
+        path_type: "{path_type_pattern}"
+        timing_type: "hold"
+      # Hold timing - TNS
+      - name: "{mode}_{corner}_h_tns_{path_type}"
+        group: "sta_timing"
+        pattern: "TNS\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
+        type: "sta_timing_row"
+        unit: "ns"
+        file_name: "{mode}/{corner}/reports/global_timing.path.rpt"
+        path_type: "{path_type_pattern}"
+        timing_type: "hold"
+      # Hold timing - NUM
+      - name: "{mode}_{corner}_h_num_{path_type}"
+        group: "sta_timing"
+        pattern: "NUM\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
+        type: "sta_timing_row"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/global_timing.path.rpt"
+        path_type: "{path_type_pattern}"
+        timing_type: "hold"
+      # Violation keywords - Max Transition
+      - name: "{mode}_{corner}_max_tran_num"
+        group: "sta_mttv"
+        pattern: "\\(VIOLATED\\)"
+        type: "count"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/all_violators.max_transition.rpt"
+        violation_type: "max_tran"
+      - name: "{mode}_{corner}_max_tran_worst"
+        group: "sta_mttv"
+        pattern: "\\s+([\\d.-]+)\\s+\\(VIOLATED\\)"
+        type: "sta_violation_worst"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/all_violators.max_transition.rpt"
+        violation_type: "max_tran"
+      # Violation keywords - Max Capacitance
+      - name: "{mode}_{corner}_max_cap_num"
+        group: "sta_max_cap"
+        pattern: "\\(VIOLATED\\)"
+        type: "count"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/all_violators.max_capacitance.rpt"
+        violation_type: "max_cap"
+      - name: "{mode}_{corner}_max_cap_worst"
+        group: "sta_max_cap"
+        pattern: "\\s+([\\d.-]+)\\s+\\(VIOLATED\\)"
+        type: "sta_violation_worst"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/all_violators.max_capacitance.rpt"
+        violation_type: "max_cap"
+      # Noise keywords - Above Low / Below High
+      - name: "{mode}_{corner}_noise_{noise_type}_num"
+        group: "sta_noise"
+        pattern: "noise_region:\\s*{noise_type}"
+        type: "sta_noise_count"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/gnoise_viols_{corner}.rpt"
+      - name: "{mode}_{corner}_noise_{noise_type}_worst"
+        group: "sta_noise"
+        pattern: "noise_region:\\s*{noise_type}"
+        type: "sta_noise_worst"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/gnoise_viols_{corner}.rpt"
+
+      # VTH Ratio keywords - extracted from line below "HVT  :  RVT  :  LVT  : ULVT" header
+      - name: "HVth"
+        group: "sta_vth"
+        pattern: "^\\s*([\\d.]+)\\s*:\\s*[\\d.]+\\s*:\\s*[\\d.]+\\s*:\\s*[\\d.]+\\s*$"
+        type: "number"
+        unit: "%"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "RVth"
+        group: "sta_vth"
+        pattern: "^\\s*[\\d.]+\\s*:\\s*([\\d.]+)\\s*:\\s*[\\d.]+\\s*:\\s*[\\d.]+\\s*$"
+        type: "number"
+        unit: "%"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "LVth"
+        group: "sta_vth"
+        pattern: "^\\s*[\\d.]+\\s*:\\s*[\\d.]+\\s*:\\s*([\\d.]+)\\s*:\\s*[\\d.]+\\s*$"
+        type: "number"
+        unit: "%"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "ULVth"
+        group: "sta_vth"
+        pattern: "^\\s*[\\d.]+\\s*:\\s*[\\d.]+\\s*:\\s*[\\d.]+\\s*:\\s*([\\d.]+)\\s*$"
+        type: "number"
+        unit: "%"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+
+      # Cell usage keywords - instance counts (from table format)
+      - name: "std_cell_inst"
+        group: "sta_cell_usage"
+        pattern: "STD Cell\\s+\\|\\s+([\\d]+)"
+        type: "number"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "comb_cell_inst"
+        group: "sta_cell_usage"
+        pattern: "\\|--\\s+COMB Cell\\s+\\|\\s+([\\d]+)"
+        type: "number"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "flip_flop_inst"
+        group: "sta_cell_usage"
+        pattern: "\\|--\\s+Flip-flop\\s+\\|\\s+([\\d]+)"
+        type: "number"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "latch_inst"
+        group: "sta_cell_usage"
+        pattern: "\\|--\\s+Latch\\s+\\|\\s+([\\d]+)"
+        type: "number"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "icg_inst"
+        group: "sta_cell_usage"
+        pattern: "\\|--\\s+ICG\\s+\\|\\s+([\\d]+)"
+        type: "number"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "pad_inst"
+        group: "sta_cell_usage"
+        pattern: "PAD\\s+\\|\\s+([\\d]+)"
+        type: "number"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "memory_inst"
+        group: "sta_cell_usage"
+        pattern: "Memory\\s+\\|\\s+([\\d]+)"
+        type: "number"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "ip_inst"
+        group: "sta_cell_usage"
+        pattern: "IP\\s+\\|\\s+([\\d]+)"
+        type: "number"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "total_inst"
+        group: "sta_cell_usage"
+        pattern: "TOTAL\\s+\\|\\s+([\\d]+)"
+        type: "number"
+        unit: ""
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      # Cell usage keywords - area metrics (from table format)
+      - name: "std_cell_area"
+        group: "sta_cell_usage"
+        pattern: "STD Cell\\s+\\|\\s+[\\d]+\\s+([\\d.]+)"
+        type: "number"
+        unit: "um^2"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "comb_cell_area"
+        group: "sta_cell_usage"
+        pattern: "\\|--\\s+COMB Cell\\s+\\|\\s+[\\d]+\\s+([\\d.]+)"
+        type: "number"
+        unit: "um^2"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "flip_flop_area"
+        group: "sta_cell_usage"
+        pattern: "\\|--\\s+Flip-flop\\s+\\|\\s+[\\d]+\\s+([\\d.]+)"
+        type: "number"
+        unit: "um^2"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "latch_area"
+        group: "sta_cell_usage"
+        pattern: "\\|--\\s+Latch\\s+\\|\\s+[\\d]+\\s+([\\d.]+)"
+        type: "number"
+        unit: "um^2"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "icg_area"
+        group: "sta_cell_usage"
+        pattern: "\\|--\\s+ICG\\s+\\|\\s+[\\d]+\\s+([\\d.]+)"
+        type: "number"
+        unit: "um^2"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "pad_area"
+        group: "sta_cell_usage"
+        pattern: "PAD\\s+\\|\\s+[\\d]+\\s+([\\d.]+)"
+        type: "number"
+        unit: "um^2"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "memory_area"
+        group: "sta_cell_usage"
+        pattern: "Memory\\s+\\|\\s+[\\d]+\\s+([\\d.]+)"
+        type: "number"
+        unit: "um^2"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "ip_area"
+        group: "sta_cell_usage"
+        pattern: "IP\\s+\\|\\s+[\\d]+\\s+([\\d.]+)"
+        type: "number"
+        unit: "um^2"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+      - name: "total_area"
+        group: "sta_cell_usage"
+        pattern: "TOTAL\\s+\\|\\s+[\\d]+\\s+([\\d.]+)"
+        type: "number"
+        unit: "um^2"
+        file_name: "{mode}/{corner}/reports/cell_usage.rpt"
+
+  # Template for Calibre PV DRC task
+  pv_calibre_drc_task: &pv_calibre_drc_task
+    description: "Calibre DRC Physical Verification"
+    log_files:
+      - "logs/DRC.log"
+    report_files:
+      - "01_DRC/DRC_RES.sum"
+    keywords:
+      - name: "drc"
+        group: "pv_drc"
+        pattern: "TOTAL DRC Results Generated:\\s*(\\d+)\\s*\\((\\d+)\\)"
+        type: "multiple_values"
+        pair_value: "cell flatten"
+        unit: ""
+        file_name: "01_DRC/DRC_RES.sum"
+      - name: "drc_rulechecks"
+        group: "pv_drc"
+        pattern: "TOTAL DRC RuleChecks Executed:\\s*(\\d+)"
+        type: "number"
+        unit: "ea"
+        file_name: "01_DRC/DRC_RES.sum"
+      - name: "cpu_time"
+        group: "pv_runtime"
+        pattern: "TOTAL CPU Time:\\s*(\\d+)"
+        type: "number"
+        unit: "ea"
+        file_name: "01_DRC/DRC_RES.sum"
+      - name: "real_time"
+        group: "pv_runtime"
+        pattern: "TOTAL REAL Time:\\s*(\\d+)"
+        type: "number"
+        unit: "ea"
+        file_name: "01_DRC/DRC_RES.sum"
+
+  # Template for Calibre PV LVS task
+  pv_calibre_lvs_task: &pv_calibre_lvs_task
+    description: "Calibre LVS Physical Verification"
+    log_files:
+      - "logs/LVS.log"
+    report_files:
+      - "02_LVS/lvs.rep"
+    keywords:
+      - name: "lvs_result"
+        group: "pv_lvs"
+        pattern: "#\\s+(CORRECT|INCORRECT|NOT COMPARED)\\s+#"
+        type: "string"
+        unit: ""
+        file_name: "02_LVS/lvs.rep"
+        search_from_top: true
+
+  # Template for standard APR tasks (place, cts, postcts, route, postroute, chipfinish)
+  standard_apr_task: &standard_apr_task
+    description: "Innovus {task_name}"
+    log_files:
+      - "logs/{task_name}.log"
+    report_files:
+      - "report/{task_name}/*.summary.gz"
+    keywords:
+      - name: "error"
+        group: "err/warn"
+        pattern: "\\*\\*ERROR: "
+        type: "count"
+        unit: ""
+        file_name: "logs/{task_name}.log"
+      - name: "warning"
+        group: "err/warn"
+        pattern: "\\*\\*WARN: "
+        type: "count"
+        unit: ""
+        file_name: "logs/{task_name}.log"
+      - name: "hotspot"
+        group: "congestion"
+        pattern: "\\[hotspot\\]\\s*\\|\\s*normalized\\s*\\|\\s*([\\d.]+)\\s*\\|\\s*([\\d.]+)\\s*\\|"
+        type: "multiple_values"
+        pair_value: "Max Total"
+        unit: ""
+        file_name: "logs/{task_name}.log"
+      - name: "s_wns"
+        group: "timing"
+        pattern: "\\|\\s+WNS \\(ns\\):\\s*\\|(.+?)\\|\\s*$"
+        type: "dynamic_table_row"
+        unit: "ns"
+        file_name: "report/{task_name}/{task_name}.summary.gz"
+        header_pattern: "\\|\\s+Setup mode\\s+\\|(.+?)\\|\\s*$"
+      - name: "s_tns"
+        group: "timing"
+        pattern: "\\|\\s+TNS \\(ns\\):\\s*\\|(.+?)\\|\\s*$"
+        type: "dynamic_table_row"
+        unit: "ns"
+        file_name: "report/{task_name}/{task_name}.summary.gz"
+        header_pattern: "\\|\\s+Setup mode\\s+\\|(.+?)\\|\\s*$"
+      - name: "s_nov"
+        group: "timing"
+        pattern: "\\|\\s+Violating Paths:\\s*\\|(.+?)\\|\\s*$"
+        type: "dynamic_table_row"
+        unit: ""
+        file_name: "report/{task_name}/{task_name}.summary.gz"
+        header_pattern: "\\|\\s+Setup mode\\s+\\|(.+?)\\|\\s*$"
+      - name: "h_wns"
+        group: "timing"
+        pattern: "\\|\\s+WNS \\(ns\\):\\s*\\|(.+?)\\|\\s*$"
+        type: "dynamic_table_row"
+        unit: "ns"
+        file_name: "report/{task_name}/{task_name}_hold_hold.summary.gz"
+        header_pattern: "\\|\\s+Hold mode\\s+\\|(.+?)\\|\\s*$"
+      - name: "h_tns"
+        group: "timing"
+        pattern: "\\|\\s+TNS \\(ns\\):\\s*\\|(.+?)\\|\\s*$"
+        type: "dynamic_table_row"
+        unit: "ns"
+        file_name: "report/{task_name}/{task_name}_hold_hold.summary.gz"
+        header_pattern: "\\|\\s+Hold mode\\s+\\|(.+?)\\|\\s*$"
+      - name: "h_nov"
+        group: "timing"
+        pattern: "\\|\\s+Violating Paths:\\s*\\|(.+?)\\|\\s*$"
+        type: "dynamic_table_row"
+        unit: ""
+        file_name: "report/{task_name}/{task_name}_hold_hold.summary.gz"
+        header_pattern: "\\|\\s+Hold mode\\s+\\|(.+?)\\|\\s*$"
+      - name: "overflow"
+        group: "congestion"
+        pattern: "Routing Overflow:?\\s*([\\d.]+)%\\s*H\\s*and\\s*([\\d.]+)%\\s*V"
+        type: "multiple_values"
+        pair_value: "H V"
+        unit: "%"
+        file_name: "logs/{task_name}.log"
+      - name: "utilization"
+        group: "utilization"
+        pattern: "Density:\\s*([\\d.]+)%"
+        type: "number"
+        unit: "%"
+        file_name: "logs/{task_name}.log"
+      - name: "cell_count"
+        pattern: "# Instances:\\s*(\\d+)"
+        type: "number"
+        unit: ""
+        file_name: "report/{task_name}/{task_name}_EU_TU"
+      - name: "area"
+        pattern: "Total area of Standard cells\\(Subtracting Physical Cells\\):\\s*([\\d.]+)"
+        type: "number"
+        unit: " um^2"
+        file_name: "report/{task_name}/{task_name}_EU_TU"
+
+# Task mappings - maps task names to their templates
+task_mappings:
+  place_inn:
+    template: "standard_apr_task"
+    task_name: "place"
+  cts_inn:
+    template: "standard_apr_task"
+    task_name: "cts"
+  postcts_inn:
+    template: "standard_apr_task"
+    task_name: "postcts"
+  route_inn:
+    template: "standard_apr_task"
+    task_name: "route"
+  postroute_inn:
+    template: "standard_apr_task"
+    task_name: "postroute"
+  chipfinish_inn:
+    template: "standard_apr_task"
+    task_name: "chipfinish"
+  init_inn:
+    template: "standard_apr_task"
+    task_name: "init_inn"
+    # init_inn has different paths
+    overrides:
+      log_files:
+        - "logs/init_inn.log"
+        - "init_inn.out"
+      report_files:
+        - "reports/*"
+        - "report/init/init.summary.gz"
+      keywords:
+        # Only error/warning for init_inn (no timing)
+        - name: "error"
+          file_name: "logs/init.log"
+        - name: "warning"
+          file_name: "logs/init.log"
+        - name: "cell_count"
+          file_name: "report/init.rpt"
+        - name: "area"
+          file_name: "report/init.rpt"
+
+  sta_pt:
+    template: "sta_primetime_task"
+    task_nam: "sta_pt"
+    dynamic_keywords: true  # Flag to generate keywords dynamically
+
+  DRC:
+    template: "pv_calibre_drc_task"
+    task_name: "DRC"
+
+  LVS:
+    template: "pv_calibre_lvs_task"
+    task_name: "LVS"
+
+# Expanded tasks section (generated by Python - DO NOT EDIT MANUALLY)
+tasks: {}
+

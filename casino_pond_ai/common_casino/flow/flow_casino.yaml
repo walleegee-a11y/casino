@@ -223,7 +223,7 @@ tasks:
 
   - name: sta_pt
     dependencies: []
-    command: "gnome-terminal --wait --title='sta @ pi' -- csh  -c ' cd ./sta_pt/ ; source all_tools_env.csh ; source ./../common/globals/pi/sta_pt/:run_sta_pt.csh'"
+    command: "cd ./sta_pt/ ; source all_tools_env.csh ; source ./../common/globals/pi/sta_pt/:run_sta_pt.csh"
     priority: 1
  
   - name: dmsa

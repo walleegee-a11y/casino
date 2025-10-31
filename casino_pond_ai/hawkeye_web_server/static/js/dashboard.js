@@ -59,6 +59,46 @@ async function loadStatistics() {
 }
 
 /**
+ * Repair archive - detect and import orphaned data files
+ */
+async function repairArchive() {
+    const button = event.target;
+    const originalText = button.textContent;
+
+    button.disabled = true;
+    button.textContent = 'Repairing...';
+    button.style.opacity = '0.6';
+
+    try {
+        const response = await fetch('/api/repair-archive', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+
+        const result = await response.json();
+
+        if (result.success) {
+            alert('Archive repair completed!\n\nReloading data...');
+
+            // Reload statistics and runs
+            await loadStatistics();
+            await loadRuns();
+        } else {
+            alert('Archive repair failed: ' + (result.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error repairing archive:', error);
+        alert('Error repairing archive: ' + error.message);
+    } finally {
+        button.disabled = false;
+        button.textContent = originalText;
+        button.style.opacity = '1';
+    }
+}
+
+/**
  * Load runs from API and populate table
  */
 async function loadRuns() {
@@ -232,10 +272,16 @@ function selectAllRuns() {
 }
 
 /**
- * Filter runs by run version search term
+ * Filter runs by run version search term with AND/OR/NOT logic
+ * Uses matchesFilterExpression() from utils.js for consistent filtering
+ * Supports:
+ * - OR logic with ',' (comma): "PI,FE" matches PI OR FE
+ * - AND logic with '+' (plus): "PI+PD" matches runs containing BOTH PI AND PD
+ * - NOT logic with '!' or '-': "!error" excludes runs containing "error"
+ * - Combined: "PI+PD,FE,!error" = (PI AND PD) OR FE, BUT NOT error
  */
 function filterByRunVersion() {
-    const searchTerm = document.getElementById('run-version-search').value.toLowerCase().trim();
+    const searchTerm = document.getElementById('run-version-search').value.trim();
 
     if (!searchTerm) {
         loadRuns(); // Reload with current filters
@@ -245,9 +291,9 @@ function filterByRunVersion() {
     // Start with original unfiltered data, then apply auto-filters
     let baseFiltered = applyAutoFilters([...originalAllRuns]);
 
-    // Filter runs that match the run version search term
+    // Filter runs using matchesFilterExpression() for AND/OR/NOT logic
     const filteredRuns = baseFiltered.filter(run => {
-        return run.run_version.toLowerCase().includes(searchTerm);
+        return matchesFilterExpression(run.run_version, searchTerm);
     });
 
     // Group ALL keywords by run version (not just matching ones)

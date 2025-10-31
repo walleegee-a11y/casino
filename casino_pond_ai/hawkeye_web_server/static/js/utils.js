@@ -35,10 +35,24 @@ function isValueEmpty(value) {
 }
 
 /**
- * Helper function to match text against filter expression with AND/OR logic
+ * Helper function to match text against filter expression with AND/OR/NOT logic
+ *
+ * Syntax:
+ * - Comma (,) = OR logic: "timing,power" matches "timing" OR "power"
+ * - Plus (+) = AND logic: "timing+setup" matches text containing BOTH "timing" AND "setup"
+ * - Exclamation (!) or Minus (-) = NOT/exclude logic: "!error,-warning" excludes "error" and "warning"
+ * - Combined: "timing+setup,power,!error" = (timing AND setup) OR power, BUT NOT error
+ *
  * @param {string} text - Text to match against
- * @param {string} filterExpression - Filter expression with AND/OR logic (comma for OR, plus for AND)
+ * @param {string} filterExpression - Filter expression with AND/OR/NOT logic
  * @returns {boolean} - True if text matches the filter expression
+ *
+ * @example
+ * matchesFilterExpression("timing_setup_wns", "timing+setup") // true - contains both
+ * matchesFilterExpression("timing_hold_wns", "timing,power") // true - contains timing
+ * matchesFilterExpression("error_count", "!error") // false - excluded
+ * matchesFilterExpression("timing_setup", "timing,!error") // true - contains timing, no error
+ * matchesFilterExpression("timing_error", "timing,!error") // false - contains error (excluded)
  */
 function matchesFilterExpression(text, filterExpression) {
     if (!filterExpression || !text) {
@@ -48,14 +62,45 @@ function matchesFilterExpression(text, filterExpression) {
     const textLower = text.toLowerCase();
     const filterLower = filterExpression.toLowerCase().trim();
 
-    // Parse filter text for mixed AND/OR logic
-    // Split by comma first (OR groups)
-    const orGroups = filterLower.split(',')
-        .map(group => group.trim())
-        .filter(group => group.length > 0);
+    // First, extract all EXCLUDE terms (starting with ! or -)
+    const excludeTerms = [];
+    const includeGroups = [];
 
-    // Check if text matches ANY of the OR groups
-    return orGroups.some(orGroup => {
+    // Split by comma to get all terms/groups
+    const allTerms = filterLower.split(',')
+        .map(term => term.trim())
+        .filter(term => term.length > 0);
+
+    // Separate exclude terms from include terms
+    allTerms.forEach(term => {
+        if (term.startsWith('!') || term.startsWith('-')) {
+            // Remove the ! or - prefix and add to exclude list
+            const excludeTerm = term.substring(1).trim();
+            if (excludeTerm.length > 0) {
+                excludeTerms.push(excludeTerm);
+            }
+        } else {
+            // Regular include term
+            includeGroups.push(term);
+        }
+    });
+
+    // STEP 1: Check EXCLUDE terms first (NOT logic)
+    // If text contains ANY exclude term, immediately return false
+    for (const excludeTerm of excludeTerms) {
+        if (textLower.includes(excludeTerm)) {
+            return false; // Excluded!
+        }
+    }
+
+    // STEP 2: If no include terms specified, and we passed exclude check, return true
+    if (includeGroups.length === 0) {
+        return true; // Only had exclude terms, and text doesn't contain them
+    }
+
+    // STEP 3: Check INCLUDE terms (AND/OR logic)
+    // Text must match at least one include group
+    return includeGroups.some(orGroup => {
         // Within each OR group, check for AND logic ('+' separator)
         if (orGroup.includes('+')) {
             // AND logic: text must contain ALL terms in this group

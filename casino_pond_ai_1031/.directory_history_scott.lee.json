@@ -1,0 +1,17 @@
+{
+  "user": "scott.lee",
+  "project_base": ".",
+  "project_name": "",
+  "history": [
+    {
+      "path": ".",
+      "timestamp": "2025-10-12T04:38:59.972079",
+      "operation": "navigate",
+      "details": null,
+      "user": "scott.lee"
+    }
+  ],
+  "current_index": 0,
+  "saved_at": "2025-10-12T04:38:59.972134",
+  "version": "2.0"
+}

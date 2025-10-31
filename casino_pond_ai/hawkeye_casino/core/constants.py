@@ -27,7 +27,44 @@ class StatusValues:
 
 
 class Colors:
-    """Color definitions for UI"""
+    """Color definitions for UI - Excel-like Professional Design"""
+
+    # ============================================================================
+    # EXCEL-LIKE PROFESSIONAL COLOR SCHEME
+    # ============================================================================
+    # Primary Colors
+    PRIMARY_BLUE = "#0078D4"      # Microsoft Blue - Primary actions
+    PRIMARY_BLUE_DARK = "#005A9E" # Darker Blue - Check Status, Gather Selected
+    SECONDARY_GRAY = "#6C757D"    # Secondary actions
+    SUCCESS_GREEN = "#107C10"     # Success/positive actions
+    WARNING_ORANGE = "#FFB900"    # Warning/export actions
+    DANGER_RED = "#D13438"        # Danger/delete actions
+    CHART_RED = "#C7402A"         # Reddish - Create Chart/Table button
+    INFO_CYAN = "#00BCF2"         # Info actions
+
+    # Backgrounds
+    NEUTRAL_LIGHT = "#F5F5F5"     # Light gray background
+    NEUTRAL_WHITE = "#FFFFFF"     # White background
+    ALT_ROW = "#F9F9F9"           # Alternating row background
+
+    # Borders and Grid
+    BORDER_GRAY = "#D1D1D1"       # Standard borders
+    BORDER_DARK = "#C0C0C0"       # Darker borders
+
+    # Hover and Selection States
+    HOVER_BLUE = "#E7F3FF"        # Row hover - light blue
+    HOVER_YELLOW = "#FFF4CE"      # Cell hover - Excel-like yellow
+    SELECTED_BLUE = "#0078D4"     # Selected items (active/focused)
+    SELECTED_GRAY = "#505050"     # Selected items (inactive/unfocused) - dark gray for contrast
+
+    # Text Colors
+    TEXT_BLACK = "#000000"        # Primary text
+    TEXT_GRAY = "#6C757D"         # Secondary text
+    TEXT_WHITE = "#FFFFFF"        # Text on dark backgrounds
+
+    # ============================================================================
+    # LEGACY COLORS (Kept for backward compatibility - use new colors above)
+    # ============================================================================
     OLIVE = "#778a35"
     PEWTER = "#ebebe8"
     OLIVE_GREEN = "#31352e"

@@ -518,22 +518,33 @@ class HawkeyeAnalyzer:
                             print(f"DEBUG: STA file pattern: {actual_pattern}")
                             print(f"DEBUG: Looking for STA file: {specific_file_path}")
 
-                            # Check if path exists (DO NOT resolve symlinks for STA!)
-                            if os.path.exists(specific_file_path):
-                                # CRITICAL: Keep original path, do NOT resolve symlink
-                                # Different modes may be symlinked to same location,
-                                # but we want to preserve mode/corner identity in the path
-                                needed_files.append(specific_file_path)
-                                print(f"DEBUG: Found STA file (preserving original path): {specific_file_path}")
-
-                                # DEBUG: Show if it's a symlink
+                            # Check if path exists (handles both files and symlinks)
+                            if os.path.lexists(specific_file_path):
+                                # For symlinks, verify target exists
                                 if os.path.islink(specific_file_path):
+                                    link_target = os.readlink(specific_file_path)
                                     real_path = os.path.realpath(specific_file_path)
-                                    print(f"DEBUG: Note: This is a symlink to: {real_path}")
-                                    print(f"DEBUG: BUT using original path to preserve mode/corner identity")
-
-                                file_found = True
-                                break
+                                    if os.path.exists(real_path) and os.path.isfile(real_path):
+                                        # CRITICAL: Keep original symlink path, do NOT use resolved path
+                                        # Different modes may be symlinked to same location,
+                                        # but we want to preserve mode/corner identity in the path
+                                        needed_files.append(specific_file_path)
+                                        print(f"DEBUG: Found STA file (symlink, preserving original path): {specific_file_path}")
+                                        print(f"DEBUG:   Link target: {link_target} (relative: {not os.path.isabs(link_target)})")
+                                        print(f"DEBUG:   Resolved to: {real_path}")
+                                        print(f"DEBUG:   BUT using original path to preserve mode/corner identity")
+                                        file_found = True
+                                        break
+                                    else:
+                                        print(f"DEBUG: Broken STA symlink: {specific_file_path}")
+                                        print(f"DEBUG:   Link target: {link_target}")
+                                        print(f"DEBUG:   Resolved to: {real_path} (does not exist)")
+                                elif os.path.exists(specific_file_path):
+                                    # Regular file (not a symlink)
+                                    needed_files.append(specific_file_path)
+                                    print(f"DEBUG: Found STA file (preserving original path): {specific_file_path}")
+                                    file_found = True
+                                    break
                             else:
                                 # Try glob pattern for wildcards (e.g., *.rpt)
                                 glob_pattern = os.path.join(run_path, actual_pattern)
@@ -544,16 +555,27 @@ class HawkeyeAnalyzer:
                                     print(f"DEBUG: Found {len(glob_matches)} STA glob matches")
                                     for match_path in glob_matches:
                                         # CRITICAL: Keep original match path, do NOT resolve symlink
-                                        if os.path.exists(match_path):
+                                        if os.path.islink(match_path):
+                                            link_target = os.readlink(match_path)
+                                            real_path = os.path.realpath(match_path)
+                                            # Verify symlink target exists
+                                            if os.path.exists(real_path) and os.path.isfile(real_path):
+                                                # Use original symlink path to preserve identity
+                                                needed_files.append(match_path)
+                                                print(f"DEBUG: Added STA glob match (symlink, preserving path): {match_path}")
+                                                print(f"DEBUG:   Link target: {link_target} (relative: {not os.path.isabs(link_target)})")
+                                                print(f"DEBUG:   Resolved to: {real_path}")
+                                                print(f"DEBUG:   BUT using original path for identity")
+                                                file_found = True
+                                                break
+                                            else:
+                                                print(f"DEBUG: Broken STA symlink in glob: {match_path}")
+                                                print(f"DEBUG:   Link target: {link_target}")
+                                                print(f"DEBUG:   Resolved to: {real_path} (does not exist)")
+                                        elif os.path.exists(match_path) and os.path.isfile(match_path):
+                                            # Regular file
                                             needed_files.append(match_path)
                                             print(f"DEBUG: Added STA glob match (preserving path): {match_path}")
-
-                                            # DEBUG: Show if it's a symlink
-                                            if os.path.islink(match_path):
-                                                real_path = os.path.realpath(match_path)
-                                                print(f"DEBUG: Note: This is a symlink to: {real_path}")
-                                                print(f"DEBUG: BUT using original path for identity")
-
                                             file_found = True
                                             break
                                     if file_found:
@@ -581,18 +603,37 @@ class HawkeyeAnalyzer:
                         specific_file_path = os.path.join(run_path, file_pattern)
                         print(f"DEBUG: Looking for regular file: {specific_file_path}")
 
-                        if os.path.exists(specific_file_path):
+                        # Check if file exists (handles both regular files and symlinks)
+                        if os.path.lexists(specific_file_path):
                             # For regular files, resolve symlink if it's a symlink
                             # This is OK for non-STA files
                             if os.path.islink(specific_file_path):
+                                # Get symlink target (raw, may be relative)
+                                link_target = os.readlink(specific_file_path)
+                                # Resolve to absolute path (handles relative symlinks like ./place.log1)
                                 real_path = os.path.realpath(specific_file_path)
-                                needed_files.append(real_path)
-                                print(f"DEBUG: Found regular file (resolved symlink): {real_path}")
+
+                                # Verify the symlink target exists and is readable
+                                if os.path.exists(real_path) and os.path.isfile(real_path):
+                                    # CRITICAL: Add the original symlink path, NOT the resolved path
+                                    # This ensures file matching in file_utils.py works correctly
+                                    # Python's open() will follow the symlink automatically
+                                    needed_files.append(specific_file_path)
+                                    print(f"DEBUG: Found regular file (symlink): {specific_file_path}")
+                                    print(f"DEBUG:   Link target: {link_target} (relative: {not os.path.isabs(link_target)})")
+                                    print(f"DEBUG:   Resolved to: {real_path}")
+                                    print(f"DEBUG:   Using original symlink path for matching")
+                                    file_found = True
+                                    break
+                                else:
+                                    print(f"DEBUG: Broken symlink: {specific_file_path}")
+                                    print(f"DEBUG:   Link target: {link_target}")
+                                    print(f"DEBUG:   Resolved to: {real_path} (does not exist)")
                             else:
                                 needed_files.append(specific_file_path)
                                 print(f"DEBUG: Found regular file: {specific_file_path}")
-                            file_found = True
-                            break
+                                file_found = True
+                                break
                         else:
                             # Try glob pattern
                             glob_pattern = os.path.join(run_path, file_pattern)
@@ -605,21 +646,31 @@ class HawkeyeAnalyzer:
                                 for file_path in glob_matches:
                                     print(f"DEBUG: Checking glob match: {file_path}")
 
-                                    # For regular files, resolve symlink
+                                    # For regular files, check if symlink
                                     if os.path.islink(file_path):
+                                        link_target = os.readlink(file_path)
                                         real_path = os.path.realpath(file_path)
-                                        if os.path.exists(real_path):
-                                            needed_files.append(real_path)
-                                            print(f"DEBUG: Added glob match (resolved symlink): {real_path}")
+                                        # Verify symlink target exists and is a file
+                                        if os.path.exists(real_path) and os.path.isfile(real_path):
+                                            # CRITICAL: Use original symlink path for matching
+                                            needed_files.append(file_path)
+                                            print(f"DEBUG: Added glob match (symlink): {file_path}")
+                                            print(f"DEBUG:   Link target: {link_target} (relative: {not os.path.isabs(link_target)})")
+                                            print(f"DEBUG:   Resolved to: {real_path}")
+                                            print(f"DEBUG:   Using original symlink path for matching")
                                             try:
                                                 file_size = os.path.getsize(real_path)
-                                                print(f"DEBUG: File size: {file_size} bytes")
+                                                print(f"DEBUG:   File size: {file_size} bytes")
                                             except Exception as e:
-                                                print(f"DEBUG: Error getting file size: {e}")
+                                                print(f"DEBUG:   Error getting file size: {e}")
                                             file_found = True
                                             break
+                                        else:
+                                            print(f"DEBUG: Broken symlink in glob: {file_path}")
+                                            print(f"DEBUG:   Link target: {link_target}")
+                                            print(f"DEBUG:   Resolved to: {real_path} (does not exist)")
                                     else:
-                                        if os.path.exists(file_path):
+                                        if os.path.exists(file_path) and os.path.isfile(file_path):
                                             needed_files.append(file_path)
                                             print(f"DEBUG: Added glob match: {file_path}")
                                             try:

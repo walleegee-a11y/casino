@@ -28,7 +28,12 @@ class DirectoryInfo:
     def __post_init__(self):
         """Initialize computed fields."""
         self.name = self.path.name
-        # Don't load metadata by default - do it lazily
+        # ALWAYS check if symlink (fast operation, no I/O needed)
+        try:
+            self.is_symlink = self.path.is_symlink()
+        except (OSError, PermissionError):
+            self.is_symlink = False
+        # Don't load other metadata by default - do it lazily
         # self._update_metadata()
 
     def _update_metadata(self, check_empty: bool = False):
@@ -62,11 +67,26 @@ class DirectoryInfo:
 
     @property
     def display_name(self) -> str:
-        """Get display name with empty indicator if needed."""
+        """Get display name with symlink/empty indicator if needed."""
+        name = self.name
+
+        # Add symlink indicator
+        if self.is_symlink:
+            name = f"{name} (ln)"
         # Only show empty indicator if we actually checked
-        if self._metadata_loaded and self.is_empty:
-            return f"{self.name} (Empty)"
-        return self.name
+        elif self._metadata_loaded and self.is_empty:
+            name = f"{name} (Empty)"
+
+        return name
+
+    def get_real_path(self) -> Optional[Path]:
+        """Get the real path if this is a symlink, otherwise return None."""
+        if self.is_symlink:
+            try:
+                return self.path.resolve()
+            except (OSError, PermissionError):
+                return None
+        return None
 
     def refresh(self, check_empty: bool = False):
         """Refresh metadata from filesystem."""
@@ -87,9 +107,26 @@ class DirectoryHierarchy:
         cls,
         path: Path,
         max_depth: int = 6,
-        current_depth: int = 0
-    ) -> 'DirectoryHierarchy':
-        """Create hierarchy from a filesystem path."""
+        current_depth: int = 0,
+        visited_real_paths: Optional[set] = None
+    ) -> Optional['DirectoryHierarchy']:
+        """Create hierarchy from a filesystem path with circular reference protection."""
+        # Initialize visited set on first call
+        if visited_real_paths is None:
+            visited_real_paths = set()
+
+        # Check for circular references using real path
+        try:
+            real_path = path.resolve()
+        except (OSError, PermissionError):
+            return None
+
+        # Skip if already visited (prevents circular references with symlinks)
+        if real_path in visited_real_paths:
+            return None
+
+        visited_real_paths.add(real_path)
+
         root_info = DirectoryInfo(path)
         hierarchy = cls(
             root=root_info,
@@ -98,25 +135,33 @@ class DirectoryHierarchy:
         )
 
         if current_depth < max_depth:
-            hierarchy._load_children()
+            hierarchy._load_children(visited_real_paths)
 
         return hierarchy
 
-    def _load_children(self):
-        """Load child directories."""
+    def _load_children(self, visited_real_paths: Optional[set] = None):
+        """Load child directories including symlinks with circular reference protection."""
         if not self.root.path.is_dir():
             return
 
+        # Initialize visited set if not provided
+        if visited_real_paths is None:
+            visited_real_paths = set()
+
         try:
             for child_path in self.root.path.iterdir():
-                if child_path.is_dir() and not child_path.is_symlink():
+                if child_path.is_dir():
                     try:
+                        # Recurse into ALL directories (including symlinks)
+                        # Circular reference protection is handled in from_path
                         child_hierarchy = DirectoryHierarchy.from_path(
                             child_path,
                             self.max_depth,
-                            self.depth + 1
+                            self.depth + 1,
+                            visited_real_paths
                         )
-                        self.children[child_path] = child_hierarchy
+                        if child_hierarchy:
+                            self.children[child_path] = child_hierarchy
                     except (OSError, PermissionError):
                         continue  # Skip inaccessible directories
         except (OSError, PermissionError):

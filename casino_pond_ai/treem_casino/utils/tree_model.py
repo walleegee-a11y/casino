@@ -225,6 +225,11 @@ class DirectoryTreeModel(QAbstractItemModel):
             item_text = item.data(index.column()) or ""
             item_path = item.path()
 
+            # Check if this is a symlink - give it special color (highest priority)
+            if item.directory_hierarchy.root.is_symlink:
+                # Symlinks shown in violet color
+                return QBrush(QColor("#9932CC"))  # Violet color
+
             # Check if this item is under works_{whoami} directory
             is_under_user_workspace = False
             username = getpass.getuser()

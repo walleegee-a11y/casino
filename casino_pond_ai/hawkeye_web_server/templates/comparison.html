@@ -83,10 +83,10 @@
         <div class="keyword-filter-section" style="padding: 8px; background: #ecf0f1; border-bottom: 1px solid #ddd;">
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                         <div style="display: flex; align-items: center; gap: 8px;">
-                            <label style="font-weight: normal; color: #2c3e50; font-size: 10px;" title="Use ',' for OR, '+' for AND. Example: PI+PD, FE+TE">Run Version:</label>
-                            <input type="text" id="comparison-search" placeholder="e.g., PI+PD, FE+TE"
+                            <label style="font-weight: normal; color: #2c3e50; font-size: 10px;" title="Use ',' for OR, '+' for AND, '!' or '-' for NOT. Example: PI+PD, FE+TE, !error">Run Version:</label>
+                            <input type="text" id="comparison-search" placeholder="e.g., PI+PD, FE+TE, !error (OR, AND, NOT)"
                                    style="flex: 1; min-width: 200px; padding: 2px 6px; border: 1px solid #ccc; border-radius: 3px; font-size: 10px;"
-                                   title="Use ',' for OR logic, '+' for AND logic. Examples: 'PI' | 'PI, FE' | 'PI+PD+fe00' | 'PI+PD, FE+TE'">
+                                   title="Use ',' for OR, '+' for AND, '!' or '-' for NOT/exclude. Examples: 'PI' | 'PI, FE' | 'PI+PD' | '!error' | 'timing,!error'">
                         </div>
                         <div style="display: flex; align-items: center; gap: 4px;">
                             <button id="sort-toggle-btn" onclick="toggleRunVersionSort()" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px; font-size: 10px; background: white; cursor: pointer;" title="Click to toggle Run Version sort">
@@ -94,10 +94,10 @@
                             </button>
                         </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
-                    <label for="keyword-search" style="font-weight: normal; color: #2c3e50; font-size: 10px;" title="Use ',' for OR, '+' for AND. Example: timing, setup+worst">Filter Keywords:</label>
-                    <input type="text" id="keyword-search" placeholder="e.g., timing, setup+worst"
+                    <label for="keyword-search" style="font-weight: normal; color: #2c3e50; font-size: 10px;" title="Use ',' for OR, '+' for AND, '!' or '-' for NOT. Example: timing, setup+worst, !error">Filter Keywords:</label>
+                    <input type="text" id="keyword-search" placeholder="e.g., timing, setup+worst, !error (OR, AND, NOT)"
                            style="padding: 4px 8px; border: 1px solid #bdc3c7; border-radius: 3px; font-size: 10px; width: 180px;"
-                           title="Use ',' for OR logic, '+' for AND logic. Examples: 'timing' | 'timing, area' | 'setup+worst' | 'setup+worst, hold+best'">
+                           title="Use ',' for OR, '+' for AND, '!' or '-' for NOT/exclude. Examples: 'timing' | 'timing, area' | 'setup+worst' | '!error' | 'timing,!error'">
                 </div>
                 <div style="display: flex; align-items: center; gap: 8px;">
                     <label for="filter-group" style="font-weight: normal; color: #2c3e50; font-size: 10px;">Group:</label>

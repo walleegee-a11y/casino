@@ -1,0 +1,73 @@
+#!/bin/csh -f
+
+set current_path = `pwd`
+set tag_inn = `echo $current_path | awk -F/ '{print $(NF-3)}'`
+set run_inn = `echo $current_path | awk -F/ '{print $(NF-1)}'`
+set top_name = `echo $current_path | awk -F/ '{print $(NF-4)}'`
+set base_path = `echo $current_path | awk -F "/works_" '{print $1}'`
+set outfeedDirName = "${base_path}/outfeeds/${top_name}/${tag_inn}/${run_inn}"
+
+
+echo $current_path
+echo $tag_inn
+echo $run_inn
+echo $top_name
+echo $base_path
+echo $outfeedDirName
+
+
+while (! -e ${outfeedDirName}/innovus.done )
+    echo "Wating for P&R"
+    echo "Wating file :${outfeedDirName}/innovus.done "
+    sleep 60
+end
+
+
+#--------------------------------------------------------------------------------Copy Star Script
+cp -rf ../common/globals/pex/* .
+#------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------reset
+
+#make Outfeed dir
+if ( -d ${outfeedDirName}/spef ) then
+    echo "already exist"
+else
+    mkdir -p ${outfeedDirName}/spef
+endif
+
+
+#make log dir 
+if ( -e log ) then
+    echo "already exist"
+else
+    mkdir -p log
+endif
+
+#remove log dir
+if ( -e ./log/star ) then
+    /bin/rm -r ./log/star
+endif
+
+#remove sum log
+if ( -e ${top_name}.star_sum  ) then
+    /bin/rm -r ${top_name}.star_sum
+endif
+
+#--------------------------------------------------------------------------------Update file variable
+sed -i 's@LEF_FILE:.*@LEF_FILE: '${outfeedDirName}'/lef/'${top_name}'_tech.lef '${outfeedDirName}'/lef/'${top_name}'_allLefLibrary.lef@g' star.cmd
+sed -i 's@DEF_FILE:.*@DEF_FILE: '${outfeedDirName}'/def/'${top_name}'.def.gz@g' star.cmd
+sed -i 's@NETLIST_FILE:.*@NETLIST_FILE: '${outfeedDirName}'/spef/'${top_name}'.spef.gz@g' star.cmd
+#------------------------------------------------------------------------------------------------
+
+
+
+#--------------------------------------------------------------------------------Run Star
+touch ${outfeedDirName}/SMC.start
+StarXtract star.cmd | tee -i log/star.log
+set fff_list = `ls -1 ${outfeedDirName}/spef/* | grep spef`
+if ( $#fff_list != 0 ) then
+    touch ${outfeedDirName}/SMC.done
+#------------------------------------------------------------------------------------------------
+
+exit

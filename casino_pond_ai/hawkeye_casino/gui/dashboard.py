@@ -20,6 +20,7 @@ import os
 import sys
 import csv
 import io
+import re
 import subprocess
 from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
@@ -30,6 +31,9 @@ from PyQt5.QtGui import QKeySequence
 from ..core.constants import Columns, StatusValues, Colors
 from ..core.analyzer import HawkeyeAnalyzer, ARCHIVE_AVAILABLE
 from ..core.config import get_all_configured_jobs_and_tasks
+from ..core.keyword_groups import (
+    load_yaml_config, group_keywords_by_yaml, extract_all_groups_from_yaml
+)
 from .workers import BackgroundWorker
 
 try:
@@ -82,6 +86,79 @@ def debug_print(message: str, category: str = ""):
             print(f"[DEBUG:{category}] {message}")
         else:
             print(f"[DEBUG] {message}")
+
+
+def natural_sort_key(text: str):
+    """Generate a key for natural (alphanumeric) sorting with prefix priority
+
+    For STA keywords (containing mode_corner patterns), sorts by prefix first:
+    - Example: "misn_ff_A.._max_cap_num" -> prioritize "misn_ff_A.." over "_max_cap_num"
+    - Result: Groups by mode/corner (A, B) before grouping by metric (num, worst)
+
+    For other keywords, splits into text and number parts for proper numeric ordering.
+    - Example: "s_wns_2" comes before "s_wns_10" (not after)
+
+    Args:
+        text: String to generate sort key for
+
+    Returns:
+        Tuple of (prefix_key, suffix_key) for sorting
+    """
+    def atoi(s):
+        return int(s) if s.isdigit() else s.lower()
+
+    # Check if this looks like an STA keyword with mode_corner pattern
+    # Pattern: {mode}_{corner}_{metric}_{type}
+    # Examples: misn_ff_0p99v_m40c_Cbest_s_wns_all, misn_ff_A.._max_cap_num
+
+    # Look for common STA metric patterns at the end
+    sta_metric_patterns = [
+        '_max_cap_num', '_max_cap_worst',
+        '_max_tran_num', '_max_tran_worst',
+        '_noise_above_low_num', '_noise_above_low_worst',
+        '_noise_below_high_num', '_noise_below_high_worst',
+        '_s_wns_', '_s_tns_', '_s_num_',
+        '_h_wns_', '_h_tns_', '_h_num_'
+    ]
+
+    # Try to find a matching pattern
+    prefix_end = -1
+    matched_suffix = None
+
+    for pattern in sta_metric_patterns:
+        if pattern in text:
+            idx = text.rfind(pattern)
+            if idx > prefix_end:
+                prefix_end = idx
+                matched_suffix = text[idx:]
+
+    if prefix_end > 0:
+        # Split into prefix (mode_corner) and suffix (metric)
+        prefix = text[:prefix_end]
+        suffix = matched_suffix
+
+        # Apply natural sort to both parts
+        prefix_key = [atoi(c) for c in re.split(r'(\d+)', prefix)]
+        suffix_key = [atoi(c) for c in re.split(r'(\d+)', suffix)]
+
+        # Return tuple: sort by prefix first, then suffix
+        return (prefix_key, suffix_key)
+
+    # For non-STA keywords, use simple natural sort
+    simple_key = [atoi(c) for c in re.split(r'(\d+)', text)]
+    return (simple_key, [])  # Empty suffix so non-STA keywords sort together
+
+
+def natural_sorted(items):
+    """Sort items using natural (alphanumeric) ordering
+
+    Args:
+        items: Iterable of strings to sort
+
+    Returns:
+        Sorted list with natural ordering (numbers sorted numerically)
+    """
+    return sorted(items, key=natural_sort_key)
 
 # ============================================================================
 
@@ -184,6 +261,11 @@ if GUI_AVAILABLE:
             self.hide_data_state = 0  # 0=show all, 1=hide invalid, 2=hide invalid+zero
             self.hide_data_hidden_columns = set()  # Columns hidden by hide invalid/zero
             self.hide_data_hidden_rows = set()     # Row indices hidden by hide invalid/zero
+
+            # Keyword grouping (from YAML configuration)
+            self.yaml_config = None  # Store YAML configuration
+            self.keyword_groups = {}  # Dict mapping group names to keyword lists
+            self.selected_keyword_groups = set()  # Set of selected group names
 
             # History storage
             self.keyword_filter_history = []
@@ -364,7 +446,106 @@ if GUI_AVAILABLE:
                         for keyword_name in task_data.get('keywords', {}).keys():
                             keywords.add(keyword_name)
 
-            return sorted(list(keywords))
+            return natural_sorted(list(keywords))
+
+        def load_yaml_config_and_group_keywords(self):
+            """Load YAML configuration and group keywords"""
+            try:
+                # Load YAML config
+                self.yaml_config = load_yaml_config()
+                if self.yaml_config:
+                    debug_print("YAML config loaded successfully", "UI")
+
+                    # Group keywords using YAML configuration
+                    self.keyword_groups = group_keywords_by_yaml(self.all_keywords, self.yaml_config)
+                    debug_print(f"Keywords grouped into {len(self.keyword_groups)} groups", "UI")
+
+                    # Update the keyword group dropdown
+                    self.update_keyword_group_dropdown()
+                else:
+                    debug_print("YAML config not found, using fallback grouping", "UI")
+                    # Fallback: all keywords in one group
+                    self.keyword_groups = {'All Keywords': self.all_keywords}
+                    self.update_keyword_group_dropdown()
+            except Exception as e:
+                debug_print(f"Error loading YAML config: {e}", "UI")
+                print(f"ERROR: Failed to load YAML config and group keywords: {e}")
+                # Fallback: all keywords in one group
+                self.keyword_groups = {'All Keywords': self.all_keywords}
+                self.update_keyword_group_dropdown()
+
+        def update_keyword_group_dropdown(self):
+            """Update the keyword group dropdown with available groups"""
+            if not hasattr(self, 'keyword_group_combo'):
+                return
+
+            # Save current selection
+            current_selection = self.keyword_group_combo.currentText()
+
+            # Clear and repopulate
+            self.keyword_group_combo.clear()
+            self.keyword_group_combo.addItem("all")
+
+            # Add groups with keyword counts
+            for group_name in self.keyword_groups.keys():
+                keyword_count = len(self.keyword_groups[group_name])
+                self.keyword_group_combo.addItem(f"{group_name} ({keyword_count})")
+
+            # Restore selection if it still exists
+            index = self.keyword_group_combo.findText(current_selection)
+            if index >= 0:
+                self.keyword_group_combo.setCurrentIndex(index)
+            else:
+                self.keyword_group_combo.setCurrentIndex(0)  # Default to "all"
+
+            # Update info label
+            self.update_keyword_group_info_label()
+
+        def update_keyword_group_info_label(self):
+            """Update the info label showing selected groups and keyword counts"""
+            if not hasattr(self, 'keyword_group_info_label'):
+                return
+
+            if not self.selected_keyword_groups:
+                self.keyword_group_info_label.setText("")
+                return
+
+            # Count total keywords in selected groups
+            total_keywords = 0
+            for group_name in self.selected_keyword_groups:
+                if group_name in self.keyword_groups:
+                    total_keywords += len(self.keyword_groups[group_name])
+
+            group_count = len(self.selected_keyword_groups)
+            self.keyword_group_info_label.setText(
+                f"{group_count} group(s) selected | {total_keywords} keywords"
+            )
+
+        def apply_keyword_group_filter(self):
+            """Apply keyword group filter (triggered when dropdown changes)"""
+            current_text = self.keyword_group_combo.currentText()
+
+            if current_text == "all":
+                self.selected_keyword_groups.clear()
+            else:
+                # Check if this is a multi-group selection (contains comma separator)
+                # Format: "group1, group2 (N groups)" or "group1, group2, group3 (N groups)"
+                # In this case, don't overwrite selected_keyword_groups as it was already set by multi-select dialog
+                if ', ' in current_text and '(' in current_text and 'group' in current_text.lower():
+                    # Multi-group selection - already set by show_multi_select_dialog, don't overwrite
+                    print(f"DEBUG: Detected multi-group combo text, keeping existing selection: {self.selected_keyword_groups}")
+                    pass
+                else:
+                    # Single group selection - extract group name from "Group Name (count)" format
+                    group_name = current_text.split(' (')[0] if ' (' in current_text else current_text
+                    self.selected_keyword_groups = {group_name}
+                    print(f"DEBUG: Single group selected: {group_name}")
+
+            # Update info label
+            self.update_keyword_group_info_label()
+
+            # Re-apply column visibility with new group filter
+            self.apply_keyword_column_visibility()
 
         def generate_dynamic_headers(self) -> List[str]:
             """Generate dynamic table headers based on configuration and discovered keywords"""
@@ -425,7 +606,7 @@ if GUI_AVAILABLE:
                 keyword_format = header.replace('-', '_')
                 configured_keyword_names.add(keyword_format)
 
-            for discovered_keyword in sorted(discovered_keywords):
+            for discovered_keyword in natural_sorted(discovered_keywords):
                 if discovered_keyword not in configured_keyword_names:
                     # Check if this is a dynamic_table_row generated keyword
                     # Format: base_name_column (e.g., s_wns_all, s_tns_reg2reg)
@@ -469,12 +650,46 @@ if GUI_AVAILABLE:
             button_frame = QFrame()
             button_layout = QHBoxLayout(button_frame)
 
+            # Quick Analyze button - Check Status + Gather Selected in one action (FIRST BUTTON)
+            quick_analyze_btn = QPushButton("Quick Analyze (^Q)")
+            quick_analyze_btn.clicked.connect(self.quick_analyze_selected)
+            quick_analyze_btn.setToolTip("Check status and analyze selected runs in one action (^Q)")
+            quick_analyze_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.ROYAL_BLUE};
+                    color: white;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #2b3250;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
+            quick_analyze_btn.setFocusPolicy(Qt.NoFocus)
+            button_layout.addWidget(quick_analyze_btn)
+
             # Check Status button - REMOVE .setShortcut()
             check_status_btn = QPushButton("Check Status (^S)")
             check_status_btn.clicked.connect(self.check_status_simple)
             # check_status_btn.setShortcut("^S")  # REMOVE THIS LINE
             check_status_btn.setToolTip("Check file status of selected runs (^S)")
-            check_status_btn.setStyleSheet(f"background-color: {Colors.BLUE_GROTTO}; color: black; padding: 2px;")
+            check_status_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.PRIMARY_BLUE_DARK};
+                    color: white;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #004578;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             check_status_btn.setFocusPolicy(Qt.NoFocus)  # ? ADD THIS
             button_layout.addWidget(check_status_btn)
 
@@ -483,7 +698,20 @@ if GUI_AVAILABLE:
             gather_btn.clicked.connect(self.gather_selected_runs)
             # gather_btn.setShortcut("^G")  # REMOVE THIS LINE
             gather_btn.setToolTip("Analyze selected tasks (^G)")
-            gather_btn.setStyleSheet(f"background-color: {Colors.ROYAL_BLUE}; color: white; padding: 2px;")
+            gather_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.PRIMARY_BLUE_DARK};
+                    color: white;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #004578;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             gather_btn.setFocusPolicy(Qt.NoFocus)  # ? ADD THIS
             button_layout.addWidget(gather_btn)
 
@@ -492,27 +720,79 @@ if GUI_AVAILABLE:
             refresh_btn.clicked.connect(self.refresh_analysis)
             # refresh_btn.setShortcut("^R")  # REMOVE THIS LINE
             refresh_btn.setToolTip("Refresh the run list (^R)")
-            refresh_btn.setStyleSheet(f"background-color: {Colors.FOREST_GREEN}; color: white; padding: 2px;")
+            refresh_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.SUCCESS_GREEN};
+                    color: white;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #0E6B0E;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(refresh_btn)
 
             # Create Chart/Table button
             if MATPLOTLIB_AVAILABLE:
                 chart_table_btn = QPushButton("Create Chart/Table")
                 chart_table_btn.clicked.connect(lambda: self.show_chart_dialog(self.table))
-                chart_table_btn.setStyleSheet(f"background-color: {Colors.SCARLET}; color: white; padding: 2px;")
+                chart_table_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {Colors.CHART_RED};
+                        color: white;
+                        padding: 6px 12px;
+                        border: 1px solid {Colors.BORDER_GRAY};
+                        font-size: 11px;
+                        font-weight: normal;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #A03020;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                    }}
+                """)
                 chart_table_btn.setToolTip("Create charts and tables from selected data")
                 button_layout.addWidget(chart_table_btn)
 
             # Export CSV button
             export_csv_btn = QPushButton("Export CSV")
             export_csv_btn.clicked.connect(self.export_table_to_csv)
-            export_csv_btn.setStyleSheet(f"background-color: {Colors.MISTY_BLUE}; color: black; padding: 2px;")
+            export_csv_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.WARNING_ORANGE};
+                    color: black;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #D39600;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(export_csv_btn)
 
             # Export HTML button
             export_html_btn = QPushButton("Export HTML")
             export_html_btn.clicked.connect(self.export_table_to_html)
-            export_html_btn.setStyleSheet(f"background-color: {Colors.MISTY_BLUE}; color: black; padding: 2px;")
+            export_html_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.WARNING_ORANGE};
+                    color: black;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #D39600;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(export_html_btn)
 
             # Archive Analysis button
@@ -520,37 +800,111 @@ if GUI_AVAILABLE:
             archive_btn.clicked.connect(self.archive_analysis_data)
 
             if ARCHIVE_AVAILABLE:
-                archive_btn.setStyleSheet(f"background-color: {Colors.TEAL}; color: black; padding: 2px;")
+                archive_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {Colors.SECONDARY_GRAY};
+                        color: white;
+                        padding: 6px 12px;
+                        border: 1px solid {Colors.BORDER_GRAY};
+                        font-size: 11px;
+                        font-weight: normal;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #5A6268;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                    }}
+                """)
                 archive_btn.setToolTip("Archive current analysis data to database")
             else:
-                archive_btn.setStyleSheet(f"background-color: {Colors.PEWTER}; color: gray; padding: 2px;")
+                archive_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {Colors.NEUTRAL_LIGHT};
+                        color: gray;
+                        padding: 6px 12px;
+                        border: 1px solid {Colors.BORDER_GRAY};
+                        font-size: 11px;
+                        font-weight: normal;
+                    }}
+                """)
                 archive_btn.setToolTip("Archive functionality not available - hawkeye_archive.py not found")
                 archive_btn.setEnabled(False)
             button_layout.addWidget(archive_btn)
 
-            # Clear Selection button
-            clear_selection_btn = QPushButton("Clear Selection (ESC)")
-            clear_selection_btn.clicked.connect(self.clear_selection)
-            clear_selection_btn.setStyleSheet(f"background-color: {Colors.PURPLE_HAZE}; color: black; padding: 2px;")
-            button_layout.addWidget(clear_selection_btn)
+#           # Clear Selection button
+#           clear_selection_btn = QPushButton("Clear Selection (ESC)")
+#           clear_selection_btn.clicked.connect(self.clear_selection)
+#           clear_selection_btn.setStyleSheet(f"""
+#               QPushButton {{
+#                   background-color: {Colors.SECONDARY_GRAY};
+#                   color: white;
+#                   padding: 6px 12px;
+#                   border: 1px solid {Colors.BORDER_GRAY};
+#                   font-size: 11px;
+#                   font-weight: normal;
+#               }}
+#               QPushButton:hover {{
+#                   background-color: #5A6268;
+#                   box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+#               }}
+#           """)
+#           button_layout.addWidget(clear_selection_btn)
 
             # Cycling Hide Data button (Show All ? Hide Invalid ? Hide Invalid+Zero ? Show All...)
             self.cycle_hide_btn = QPushButton("Hide Invalid Data (^I)")
             self.cycle_hide_btn.clicked.connect(self.cycle_hide_data)
             self.cycle_hide_btn.setToolTip("Hide invalid/zero data based on currently filtered rows (respects Advanced Filters)")
-            self.cycle_hide_btn.setStyleSheet(f"background-color: {Colors.MISTY_BLUE}; color: black; padding: 2px;")
+            self.cycle_hide_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.INFO_CYAN};
+                    color: black;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #009ED5;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(self.cycle_hide_btn)
 
             # Toggle Path Columns button
             self.toggle_path_btn = QPushButton("Hide Path Columns (^P)")
             self.toggle_path_btn.clicked.connect(self.toggle_path_columns)
-            self.toggle_path_btn.setStyleSheet(f"background-color: {Colors.MISTY_BLUE}; color: black; padding: 2px;")
+            self.toggle_path_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.INFO_CYAN};
+                    color: black;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #009ED5;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(self.toggle_path_btn)
 
             # Show Hidden Columns button
             self.show_hidden_columns_btn = QPushButton("Show Hidden Columns")
             self.show_hidden_columns_btn.clicked.connect(self.show_hidden_columns)
-            self.show_hidden_columns_btn.setStyleSheet(f"background-color: {Colors.TEAL}; color: black; padding: 2px;")
+            self.show_hidden_columns_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.INFO_CYAN};
+                    color: black;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #009ED5;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             self.show_hidden_columns_btn.setEnabled(False)
             button_layout.addWidget(self.show_hidden_columns_btn)
 
@@ -558,7 +912,20 @@ if GUI_AVAILABLE:
             self.keyword_width_btn = QPushButton("Keyword Width: 80px")
             self.keyword_width_btn.clicked.connect(self.cycle_keyword_column_width)
             self.keyword_width_btn.setToolTip("Cycle keyword column widths (40px ? 60px ? 80px ? Autofit ? 40px...)")
-            self.keyword_width_btn.setStyleSheet(f"background-color: {Colors.SAGE_GREEN}; color: black; padding: 2px;")
+            self.keyword_width_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.SECONDARY_GRAY};
+                    color: white;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #5A6268;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(self.keyword_width_btn)
 
             button_layout.addStretch()
@@ -721,8 +1088,23 @@ if GUI_AVAILABLE:
             filter_row2.addStretch()
             filter_layout.addLayout(filter_row2)
 
-            # Filter Row 3
+            # Filter Row 3: Keyword Group, Keyword Filter, and Column Visibility
             filter_row3 = QHBoxLayout()
+
+            # Keyword Group filter
+            filter_row3.addWidget(QLabel("Keyword Group:"))
+            self.keyword_group_combo = QComboBox()
+            self.keyword_group_combo.addItems(["all"])
+            self.keyword_group_combo.setEditable(True)
+            self.keyword_group_combo.setInsertPolicy(QComboBox.NoInsert)
+            self.keyword_group_combo.setSizeAdjustPolicy(QComboBox.AdjustToContents)
+            self.keyword_group_combo.currentTextChanged.connect(self.apply_keyword_group_filter)
+            filter_row3.addWidget(self.keyword_group_combo)
+
+            self.keyword_group_multi_btn = QPushButton("...")
+            self.keyword_group_multi_btn.setMaximumWidth(30)
+            self.keyword_group_multi_btn.clicked.connect(lambda: self.show_multi_select_dialog('keyword_group', 'Keyword Group'))
+            filter_row3.addWidget(self.keyword_group_multi_btn)
 
             # Keyword filter
             filter_row3.addWidget(QLabel("Keyword Filter:"))
@@ -737,7 +1119,7 @@ if GUI_AVAILABLE:
             # Keyword column visibility
             filter_row3.addWidget(QLabel("Show Keyword Columns:"))
             self.keyword_visibility_input = QLineEdit()
-            self.keyword_visibility_input.setPlaceholderText("e.g., 'hotspot,power' for OR, 'hotspot+power' for AND")
+            self.keyword_visibility_input.setPlaceholderText("e.g., 'timing,power' (OR), 'timing+setup' (AND), '!error' (NOT)")
             self.keyword_visibility_input.setClearButtonEnabled(True)  # Add native X clear button
             self.keyword_visibility_input.textChanged.connect(self.apply_keyword_column_visibility)
             self.keyword_visibility_input.textChanged.connect(self.save_keyword_visibility_history)
@@ -774,55 +1156,77 @@ if GUI_AVAILABLE:
             # ADD: Ensure selection behavior is correct
             self.table.setSelectionBehavior(QTreeWidget.SelectRows)  # Select entire rows
 
+            # Enable alternating row colors for Excel-like appearance
+            self.table.setAlternatingRowColors(True)
+
             # Set custom delegate for right-aligned display
-            self.right_align_delegate = RightAlignDelegate()
-            # ADD THIS: Set custom delegate for right-aligned display
             self.right_align_delegate = RightAlignDelegate()
             for col in range(100):  # Apply to first 100 columns
                 self.table.setItemDelegateForColumn(col, self.right_align_delegate)
 
-            self.table.setStyleSheet("""
-                QTreeWidget {
+            # Excel-like Professional Table Styling
+            self.table.setStyleSheet(f"""
+                QTreeWidget {{
                     outline: none;
-                    border: 1px solid #ccc;
-                    gridline-color: transparent;
+                    border: 1px solid {Colors.BORDER_DARK};
+                    gridline-color: {Colors.BORDER_GRAY};
                     show-decoration-selected: 1;
-                }
+                    background-color: white;
+                    alternate-background-color: {Colors.ALT_ROW};
+                    font-size: 11px;
+                }}
 
-                QTreeWidget::item {
-                    padding: 0px;
+                QTreeWidget::item {{
+                    padding: 4px 6px;
                     margin: 0px;
                     border: none;
                     outline: none;
-                }
+                    min-height: 22px;
+                }}
 
-                QTreeWidget::branch {
+                QTreeWidget::branch {{
                     /* Remove tree branch decorations completely */
                     background: transparent;
                     border: none;
                     margin: 0px;
                     padding: 0px;
-                }
+                }}
 
-                QTreeWidget::item:selected {
-                    background-color: #3daee9;
-                    color: white;
+                QTreeWidget::item:selected {{
+                    background-color: {Colors.SELECTED_BLUE};
+                    color: {Colors.TEXT_WHITE};
                     border: none;
-                }
+                }}
 
-                QTreeWidget::item:selected:!active {
-                    background-color: #85c1e9;
-                    color: white;
+                QTreeWidget::item:selected:!active {{
+                    background-color: {Colors.SELECTED_GRAY};
+                    color: {Colors.TEXT_WHITE};
                     border: none;
-                }
+                }}
 
-                QTreeWidget::item:hover:!selected {
-                    background-color: #e8f4f8;
-                }
+                QTreeWidget::item:hover:!selected {{
+                    background-color: {Colors.HOVER_BLUE};
+                }}
 
-                QTreeWidget::item:hover {
+                QTreeWidget::item:hover {{
                     border: none;
-                }
+                }}
+
+                QHeaderView::section {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                stop:0 {Colors.NEUTRAL_LIGHT}, stop:1 #EBEBEB);
+                    color: {Colors.TEXT_BLACK};
+                    padding: 6px 8px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    border-bottom: 2px solid {Colors.PRIMARY_BLUE};
+                    font-weight: 600;
+                    font-size: 11px;
+                }}
+
+                QHeaderView::section:hover {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                                                stop:0 #EBEBEB, stop:1 #E0E0E0);
+                }}
             """)
 
             # Install event filter to track mouse position
@@ -900,18 +1304,20 @@ if GUI_AVAILABLE:
             self.progress_bar.setMaximumHeight(15)
             self.progress_bar.setTextVisible(True)
             self.progress_bar.setAlignment(Qt.AlignCenter)
-            self.progress_bar.setStyleSheet("""
-                QProgressBar {
-                    border: 1px solid #ccc;
-                    border-radius: 3px;
-                    text-align: center;
-                    font-size: 10px;
-                    background-color: #f0f0f0;
-                }
-                QProgressBar::chunk {
-                    background-color: #4CAF50;
+            # Excel-like Progress Bar Styling
+            self.progress_bar.setStyleSheet(f"""
+                QProgressBar {{
+                    border: 1px solid {Colors.BORDER_GRAY};
                     border-radius: 2px;
-                }
+                    text-align: center;
+                    font-size: 11px;
+                    background-color: {Colors.NEUTRAL_LIGHT};
+                    color: {Colors.TEXT_BLACK};
+                }}
+                QProgressBar::chunk {{
+                    background-color: {Colors.SUCCESS_GREEN};
+                    border-radius: 1px;
+                }}
             """)
 
             # ADD THIS LINE - Add progress bar to main layout BEFORE status bar
@@ -923,6 +1329,21 @@ if GUI_AVAILABLE:
             # Status bar
             self.status_bar = QStatusBar()
             self.setStatusBar(self.status_bar)
+
+            # Add selection count label to status bar (permanent widget on the right)
+            self.selection_count_label = QLabel("0 items selected")
+            self.selection_count_label.setStyleSheet(f"""
+                QLabel {{
+                    color: {Colors.PRIMARY_BLUE};
+                    font-weight: 600;
+                    padding: 2px 8px;
+                    border-left: 2px solid {Colors.BORDER_GRAY};
+                }}
+            """)
+            self.status_bar.addPermanentWidget(self.selection_count_label)
+
+            # Connect table selection changes to update selection count
+            self.table.itemSelectionChanged.connect(self.update_selection_count)
 
             # Setup APPLICATION-WIDE keyboard shortcuts
             # These work regardless of which widget has focus
@@ -941,6 +1362,11 @@ if GUI_AVAILABLE:
             self.shortcut_gather = QShortcut(QKeySequence("Ctrl+G"), self)
             self.shortcut_gather.setContext(Qt.ApplicationShortcut)
             self.shortcut_gather.activated.connect(self.gather_selected_runs)
+
+            # ^Q for Quick Analyze
+            self.shortcut_quick_analyze = QShortcut(QKeySequence("Ctrl+Q"), self)
+            self.shortcut_quick_analyze.setContext(Qt.ApplicationShortcut)
+            self.shortcut_quick_analyze.activated.connect(self.quick_analyze_selected)
 
             # ^R for Refresh
             self.shortcut_refresh = QShortcut(QKeySequence("Ctrl+R"), self)
@@ -1605,20 +2031,155 @@ if GUI_AVAILABLE:
             self.run_version_combo.setCurrentText("all")
             self.keyword_filter_input.clear()
             self.keyword_visibility_input.clear()
+
+            # Clear keyword group selection
+            self.selected_keyword_groups.clear()
+            if hasattr(self, 'keyword_group_combo'):
+                self.keyword_group_combo.setCurrentText("all")
+            if hasattr(self, 'keyword_group_info_label'):
+                self.keyword_group_info_label.setText("")
+
             self.show_all_keyword_columns()
             self.apply_filters()
 
         def apply_keyword_column_visibility(self):
-            """Apply keyword column visibility based on input"""
+            """Apply keyword column visibility based on input AND keyword group filter"""
             visibility_text = self.keyword_visibility_input.text().strip()
 
-            if not visibility_text:
-                self.show_all_keyword_columns()
-            else:
-                self.show_specific_keyword_columns(visibility_text)
+            # Get all keyword columns
+            headers = self.generate_dynamic_headers()
+            path_column_count = Columns.PATH_COLUMN_COUNT
+
+            # Start with all keyword columns
+            all_keyword_cols = set(range(path_column_count, len(headers)))
+            visible_cols = all_keyword_cols.copy()
+
+            # STEP 1: Apply group filter first (if any groups selected)
+            if self.selected_keyword_groups:
+                print(f"DEBUG: Selected keyword groups: {self.selected_keyword_groups}")
+                print(f"DEBUG: Available groups in keyword_groups: {list(self.keyword_groups.keys())}")
+                group_filtered_keywords = set()
+                for group_name in self.selected_keyword_groups:
+                    if group_name in self.keyword_groups:
+                        keywords_in_group = self.keyword_groups[group_name]
+                        print(f"DEBUG: Group '{group_name}' has {len(keywords_in_group)} keywords")
+                        group_filtered_keywords.update(keywords_in_group)
+                    else:
+                        print(f"DEBUG: Group '{group_name}' NOT FOUND in keyword_groups!")
+
+                print(f"DEBUG: Total keywords from selected groups: {len(group_filtered_keywords)}")
+                print(f"DEBUG: Combined keywords (first 10): {sorted(list(group_filtered_keywords))[:10]}")
+
+                # Only show columns for keywords in selected groups
+                visible_cols = set()
+                matched_count = 0
+                unmatched_examples = []
+                for col_idx in all_keyword_cols:
+                    if col_idx < len(headers):
+                        # Convert header back to keyword name (handle '-' separator)
+                        header = headers[col_idx]
+                        if "-" in header:
+                            keyword_parts = header.split("-")
+                            if len(keyword_parts) >= 2:
+                                base_keyword = keyword_parts[0]
+                                value_suffix = keyword_parts[1]
+                                keyword_name = f"{base_keyword}_{value_suffix}"
+                            else:
+                                keyword_name = header.replace('-', '_')
+                        else:
+                            keyword_name = header.replace('-', '_')
+
+                        if keyword_name in group_filtered_keywords:
+                            visible_cols.add(col_idx)
+                            matched_count += 1
+                        elif len(unmatched_examples) < 5:
+                            # Collect first 5 unmatched examples for debugging
+                            unmatched_examples.append((header, keyword_name))
+
+                print(f"DEBUG: Matched {matched_count} columns from group filter (out of {len(all_keyword_cols)} keyword columns)")
+                if unmatched_examples:
+                    print("DEBUG: Unmatched examples (header -> keyword_name):")
+                    for header, keyword_name in unmatched_examples:
+                        print(f"  '{header}' -> '{keyword_name}'")
+
+            # STEP 2: Apply text filter on top of group filter with AND/OR/NOT logic
+            if visibility_text:
+                # Parse filter text for mixed AND/OR/NOT logic
+                # Split by comma first to get all terms
+                all_terms = [term.strip() for term in visibility_text.split(',') if term.strip()]
+
+                # Separate exclude terms (starting with ! or -) from include terms
+                exclude_terms = []
+                include_groups = []
+
+                for term in all_terms:
+                    if term.startswith('!') or term.startswith('-'):
+                        # Remove the ! or - prefix and add to exclude list
+                        exclude_term = term[1:].strip().lower()
+                        if exclude_term:
+                            exclude_terms.append(exclude_term)
+                    else:
+                        # Regular include term
+                        include_groups.append(term)
+
+                # Further filter visible_cols based on text filter
+                text_filtered_cols = set()
+                for col in visible_cols:
+                    if col < len(headers):
+                        column_name = headers[col].lower()
+
+                        # STEP 2.1: Check EXCLUDE terms first (NOT logic)
+                        # If column contains ANY exclude term, skip it
+                        is_excluded = any(exclude_term in column_name for exclude_term in exclude_terms)
+                        if is_excluded:
+                            continue  # Skip this column (excluded)
+
+                        # STEP 2.2: If no include terms specified, and passed exclude check, include it
+                        if not include_groups:
+                            text_filtered_cols.add(col)
+                            continue
+
+                        # STEP 2.3: Check INCLUDE terms (AND/OR logic)
+                        # Column must match at least one include group
+                        matches_any_group = False
+
+                        for or_group in include_groups:
+                            # Within each OR group, check for AND logic ('+' separator)
+                            if '+' in or_group:
+                                # AND logic: column must contain ALL terms in this group
+                                and_terms = [term.strip().lower() for term in or_group.split('+') if term.strip()]
+                                if all(term in column_name for term in and_terms):
+                                    matches_any_group = True
+                                    break
+                            else:
+                                # Simple term: column must contain this term
+                                if or_group.lower() in column_name:
+                                    matches_any_group = True
+                                    break
+
+                        if matches_any_group:
+                            text_filtered_cols.add(col)
+
+                visible_cols = text_filtered_cols
+
+            # STEP 3: Show/hide columns based on final visible set
+            for col in all_keyword_cols:
+                should_hide = col not in visible_cols
+                # CRITICAL: Don't show columns that are hidden by "Hide Invalid Data"
+                if col not in self.hide_data_hidden_columns:
+                    self.table.setColumnHidden(col, should_hide)
+                # If column is in hide_data_hidden_columns, keep it hidden
 
         def show_all_keyword_columns(self):
-            """Show all keyword columns (except those hidden by hide data state)"""
+            """Show all keyword columns (except those hidden by hide data state or group filter)"""
+            # Clear any group selection to show all
+            self.selected_keyword_groups.clear()
+            if hasattr(self, 'keyword_group_combo'):
+                self.keyword_group_combo.setCurrentText("all")
+            if hasattr(self, 'keyword_group_info_label'):
+                self.keyword_group_info_label.setText("")
+
+            # Show all columns
             headers = self.generate_dynamic_headers()
             path_column_count = Columns.PATH_COLUMN_COUNT
 
@@ -1627,50 +2188,6 @@ if GUI_AVAILABLE:
                 if col not in self.hide_data_hidden_columns:
                     self.table.setColumnHidden(col, False)
                 # If column is in hide_data_hidden_columns, keep it hidden
-
-        def show_specific_keyword_columns(self, filter_text: str):
-            """Show only keyword columns that match the filter text with AND/OR logic, hide others
-
-            IMPORTANT: Respects hide_data_hidden_columns - won't show columns hidden by "Hide Invalid Data"
-            """
-            headers = self.generate_dynamic_headers()
-            path_column_count = Columns.PATH_COLUMN_COUNT
-
-            # First, hide all keyword columns
-            for col in range(path_column_count, len(headers)):
-                self.table.setColumnHidden(col, True)
-
-            # Parse filter text for mixed AND/OR logic
-            # Split by comma first (OR groups)
-            or_groups = [group.strip() for group in filter_text.split(',') if group.strip()]
-
-            for col in range(path_column_count, len(headers)):
-                if col < len(headers):
-                    column_name = headers[col].lower()
-
-                    # Check if column matches ANY of the OR groups
-                    matches_any_group = False
-
-                    for or_group in or_groups:
-                        # Within each OR group, check for AND logic ('+' separator)
-                        if '+' in or_group:
-                            # AND logic: column must contain ALL terms in this group
-                            and_terms = [term.strip().lower() for term in or_group.split('+') if term.strip()]
-                            if all(term in column_name for term in and_terms):
-                                matches_any_group = True
-                                break
-                        else:
-                            # Simple term: column must contain this term
-                            if or_group.lower() in column_name:
-                                matches_any_group = True
-                                break
-
-                    # Show column if it matches any OR group
-                    # BUT CRITICAL: Don't show if it's hidden by "Hide Invalid Data"
-                    if matches_any_group:
-                        if col not in self.hide_data_hidden_columns:
-                            self.table.setColumnHidden(col, False)
-                        # else: keep it hidden (it's in hide_data_hidden_columns)
 
         def clear_keyword_visibility_filter(self):
             """Clear keyword column visibility filter"""
@@ -1777,6 +2294,115 @@ if GUI_AVAILABLE:
                 QMessageBox.critical(self, "Error", f"Status check failed:\n{str(e)}")
             finally:
                 # Hide progress bar
+                self.progress_bar.hide()
+                QApplication.processEvents()
+
+        def quick_analyze_selected(self):
+            """Quick analyze: Check status + Gather Selected in one action"""
+            selected_items = self.table.selectedItems()
+
+            if not selected_items:
+                QMessageBox.information(self, "No Selection",
+                                      "Please select one or more runs to analyze.\n\n"
+                                      "This will:\n"
+                                      "1. Check file status for selected runs\n"
+                                      "2. Automatically analyze all available tasks")
+                return
+
+            # Extract unique run paths from selected items
+            selected_runs = []
+            for item in selected_items:
+                if not item.text(0).startswith("---"):
+                    run_path = item.data(0, Qt.UserRole)
+                    if run_path and run_path not in selected_runs:
+                        selected_runs.append(run_path)
+
+            if not selected_runs:
+                QMessageBox.information(self, "No Valid Runs Selected",
+                                      "Please select valid run items to analyze.")
+                return
+
+            # STEP 1: Check Status (expand detailed view)
+            self.status_bar.showMessage(f"Step 1/2: Checking status for {len(selected_runs)} runs...")
+            QApplication.processEvents()
+
+            # Setup progress bar for status check
+            total_runs = len(selected_runs)
+            self.progress_bar.setRange(0, total_runs)
+            self.progress_bar.setValue(0)
+            self.progress_bar.setFormat(f"Step 1/2: Checking status... (0/{total_runs})")
+            self.progress_bar.show()
+            QApplication.processEvents()
+
+            try:
+                # Clear table and prepare for detailed view
+                self.table.clear()
+                self.clear_user_hidden_columns()
+
+                headers = self.generate_dynamic_headers()
+                self.table.setHeaderLabels(headers)
+
+                # Process each run with progress updates
+                for run_index, run_path in enumerate(selected_runs, start=1):
+                    self.progress_bar.setValue(run_index - 1)
+                    run_name = run_path.split('/')[-1] if '/' in run_path else run_path
+                    self.progress_bar.setFormat(f"Step 1/2: Checking status {run_index}/{total_runs} - {run_name}")
+                    self.status_bar.showMessage(f"Step 1/2: Processing run {run_index}/{total_runs}: {run_name}")
+                    QApplication.processEvents()
+
+                    self.populate_detailed_view_for_single_run(run_path, headers)
+
+                # Finish status check
+                self.progress_bar.setValue(total_runs)
+                self.progress_bar.setFormat(f"Step 1/2 completed: {total_runs} runs")
+                QApplication.processEvents()
+
+                # Set column widths
+                self.set_column_widths_for_detailed_view()
+
+                # Update dropdowns
+                self.update_job_dropdown()
+                self.update_task_dropdown()
+                self.update_status_dropdown()
+
+                # Re-apply filters
+                self.reapply_filters_after_table_update()
+
+                # STEP 2: Auto-select all "Ready" tasks and gather them
+                self.status_bar.showMessage(f"Step 2/2: Selecting tasks to analyze...")
+                QApplication.processEvents()
+
+                # Select all items with "Ready" status
+                ready_count = 0
+                for i in range(self.table.topLevelItemCount()):
+                    item = self.table.topLevelItem(i)
+                    if item and not item.isHidden():
+                        status_text = item.text(Columns.STATUS)
+                        if status_text == StatusValues.READY:
+                            item.setSelected(True)
+                            ready_count += 1
+
+                if ready_count == 0:
+                    self.progress_bar.hide()
+                    QMessageBox.information(self, "No Tasks Ready",
+                                          f"Status check completed for {total_runs} runs.\n\n"
+                                          f"No tasks are ready to analyze.\n"
+                                          f"Check the Status column for details.")
+                    return
+
+                # Now gather the selected tasks
+                self.status_bar.showMessage(f"Step 2/2: Analyzing {ready_count} ready tasks...")
+                QApplication.processEvents()
+
+                # Call gather_selected_runs (it will handle its own progress bar)
+                self.gather_selected_runs()
+
+            except Exception as e:
+                print(f"ERROR: Quick analyze failed: {e}")
+                import traceback
+                traceback.print_exc()
+                self.status_bar.showMessage(f"Quick analyze failed: {str(e)}")
+                QMessageBox.critical(self, "Error", f"Quick analyze failed:\n{str(e)}")
                 self.progress_bar.hide()
                 QApplication.processEvents()
 
@@ -2152,6 +2778,9 @@ if GUI_AVAILABLE:
             new_headers = self.generate_dynamic_headers()
             self.table.setHeaderLabels(new_headers)
 
+            # Load YAML config and group keywords for filtering
+            self.load_yaml_config_and_group_keywords()
+
             # Reconstruct selected analysis structure
             selected_analysis = {}
             for run_path, run_data in analysis_results.items():
@@ -2175,6 +2804,9 @@ if GUI_AVAILABLE:
 
             # Clear filters to show results
             self.clear_filters()
+
+            # Unselect all items after analysis completion
+            self.table.clearSelection()
 
             # Clean up worker
             if hasattr(self, 'bg_worker'):
@@ -2322,18 +2954,17 @@ if GUI_AVAILABLE:
                         else:
                             value = keyword_data['value']
                             if isinstance(value, (int, float)):
-                                if abs(value) >= 1e6:
-                                    if value == int(value):
-                                        return str(int(value))
-                                    else:
-                                        return f"{value:,.0f}" if value >= 1000 else f"{value:.2f}"
-                                elif abs(value) < 1e-3 and value != 0:
-                                    return f"{value:.2e}"
+                                # Special case: zero displays as "0"
+                                if value == 0:
+                                    return "0"
+                                # Check if it's effectively an integer (no decimal part)
+                                elif isinstance(value, float) and value == int(value):
+                                    return str(int(value))
+                                # Regular float numbers - show up to 4 decimal places, strip trailing zeros
                                 elif isinstance(value, float):
-                                    if value == int(value):
-                                        return str(int(value))
-                                    else:
-                                        return f"{value:.6g}"
+                                    # Format with 4 decimals, then strip trailing zeros and decimal point if needed
+                                    formatted = f"{value:.4f}".rstrip('0').rstrip('.')
+                                    return formatted
                                 else:
                                     return str(value)
                             else:
@@ -2439,6 +3070,42 @@ if GUI_AVAILABLE:
             self.table.clearSelection()
             self.status_bar.showMessage("Selection cleared")
 
+        def update_selection_count(self):
+            """Update the selection count label in status bar"""
+            selected_items = self.table.selectedItems()
+            count = len(selected_items)
+
+            if count == 0:
+                self.selection_count_label.setText("0 items selected")
+                self.selection_count_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {Colors.TEXT_GRAY};
+                        font-weight: 600;
+                        padding: 2px 8px;
+                        border-left: 2px solid {Colors.BORDER_GRAY};
+                    }}
+                """)
+            elif count == 1:
+                self.selection_count_label.setText("1 item selected")
+                self.selection_count_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {Colors.PRIMARY_BLUE};
+                        font-weight: 600;
+                        padding: 2px 8px;
+                        border-left: 2px solid {Colors.BORDER_GRAY};
+                    }}
+                """)
+            else:
+                self.selection_count_label.setText(f"{count} items selected")
+                self.selection_count_label.setStyleSheet(f"""
+                    QLabel {{
+                        color: {Colors.PRIMARY_BLUE};
+                        font-weight: 600;
+                        padding: 2px 8px;
+                        border-left: 2px solid {Colors.BORDER_GRAY};
+                    }}
+                """)
+
         def toggle_path_columns(self):
             """Toggle visibility of path columns"""
             self.path_columns_hidden = not self.path_columns_hidden
@@ -2500,21 +3167,60 @@ if GUI_AVAILABLE:
                 # State 0: Show All Data
                 self.show_all_data()
                 self.cycle_hide_btn.setText("Hide Invalid Data (^I)")
-                self.cycle_hide_btn.setStyleSheet(f"background-color: {Colors.MISTY_BLUE}; color: black; padding: 2px;")
+                self.cycle_hide_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {Colors.INFO_CYAN};
+                        color: black;
+                        padding: 6px 12px;
+                        border: 1px solid {Colors.BORDER_GRAY};
+                        font-size: 11px;
+                        font-weight: normal;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #009ED5;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                    }}
+                """)
                 self.status_bar.showMessage("Showing all data. Press ^I to hide invalid data (works on filtered rows).")
 
             elif self.hide_data_state == 1:
                 # State 1: Hide Invalid Data
                 self.hide_invalid_data()
                 self.cycle_hide_btn.setText("Hide Invalid + Zero (^I)")
-                self.cycle_hide_btn.setStyleSheet(f"background-color: {Colors.OLIVE}; color: black; padding: 2px;")
+                self.cycle_hide_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {Colors.WARNING_ORANGE};
+                        color: black;
+                        padding: 6px 12px;
+                        border: 1px solid {Colors.BORDER_GRAY};
+                        font-size: 11px;
+                        font-weight: normal;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #D39600;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                    }}
+                """)
                 # Status message set by hide_invalid_data()
 
             elif self.hide_data_state == 2:
                 # State 2: Hide Invalid + Zero Data
                 self.hide_invalid_and_zero_data()
                 self.cycle_hide_btn.setText("Show All Data (^I)")
-                self.cycle_hide_btn.setStyleSheet(f"background-color: {Colors.TEAL}; color: black; padding: 2px;")
+                self.cycle_hide_btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {Colors.SUCCESS_GREEN};
+                        color: white;
+                        padding: 6px 12px;
+                        border: 1px solid {Colors.BORDER_GRAY};
+                        font-size: 11px;
+                        font-weight: normal;
+                    }}
+                    QPushButton:hover {{
+                        background-color: #0E6B0E;
+                        box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                    }}
+                """)
                 # Status message set by hide_invalid_and_zero_data()
 
         def hide_invalid_data(self):
@@ -2587,12 +3293,29 @@ if GUI_AVAILABLE:
                 condition_func: Function that takes value_text and returns True if invalid
                 description: Description for status message (e.g., 'invalid', 'invalid/zero')
             """
-            # Clear previous hide data tracking
+            # CRITICAL FIX: Unhide previously hidden rows/columns BEFORE clearing tracking
+            # This ensures we re-evaluate ALL rows, not just currently visible ones
+            headers = self.generate_dynamic_headers()
+            path_column_count = Columns.PATH_COLUMN_COUNT
+
+            # Unhide rows that were hidden by previous hide_data state
+            for row_index in self.hide_data_hidden_rows:
+                if row_index < self.table.topLevelItemCount():
+                    item = self.table.topLevelItem(row_index)
+                    if item:
+                        item.setHidden(False)
+
+            # Unhide columns that were hidden by previous hide_data state
+            for col_index in self.hide_data_hidden_columns:
+                if col_index < len(headers):
+                    self.table.setColumnHidden(col_index, False)
+
+            # NOW clear the tracking sets
             self.hide_data_hidden_columns.clear()
             self.hide_data_hidden_rows.clear()
 
-            # CRITICAL FIX: Only analyze rows that are currently visible (passing Advanced Filters)
-            # Do NOT show all rows temporarily - respect current filter state
+            # Get rows that are visible AFTER unhiding (respecting only user filters)
+            # These are rows passing Advanced Filters, not hide_data hiding
             all_items = [self.table.topLevelItem(i)
                          for i in range(self.table.topLevelItemCount())
                          if not self.table.topLevelItem(i).isHidden()]
@@ -2601,8 +3324,7 @@ if GUI_AVAILABLE:
                 self.status_bar.showMessage("No items to analyze (all rows filtered out).")
                 return
 
-            headers = self.generate_dynamic_headers()
-            path_column_count = Columns.PATH_COLUMN_COUNT
+            # Initialize lists for tracking what to hide
             columns_to_hide = []
             rows_to_hide = []
 
@@ -2618,15 +3340,16 @@ if GUI_AVAILABLE:
 
             # Check rows against condition (NOW columns are already hidden)
             for item in all_items:
+                # Fixed: Use len(headers) instead of item.columnCount() to check ALL columns
+                # item.columnCount() may be less than len(headers) if the item doesn't have all columns set
                 valid_values = sum(
-                    1 for col_index in range(path_column_count, item.columnCount())
-                    if col_index < len(headers)
-                    and not self.table.isColumnHidden(col_index)
+                    1 for col_index in range(path_column_count, len(headers))
+                    if not self.table.isColumnHidden(col_index)
                     and not condition_func(item.text(col_index))
                 )
                 total_cols = sum(
-                    1 for col_index in range(path_column_count, item.columnCount())
-                    if col_index < len(headers) and not self.table.isColumnHidden(col_index)
+                    1 for col_index in range(path_column_count, len(headers))
+                    if not self.table.isColumnHidden(col_index)
                 )
 
                 # ALSO FIX: Handle case when all columns are hidden (total_cols == 0)
@@ -2779,10 +3502,11 @@ if GUI_AVAILABLE:
             layout = QVBoxLayout(dialog)
 
             title_label = QLabel("Choose Export Option:")
-            title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+            title_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {Colors.PRIMARY_BLUE};")
             layout.addWidget(title_label)
 
             desc_label = QLabel("Select what data to export:")
+            desc_label.setStyleSheet(f"color: {Colors.TEXT_GRAY}; font-size: 12px;")
             layout.addWidget(desc_label)
 
             self.export_full_table = QCheckBox("Export Full Table (All Data)")
@@ -2800,12 +3524,38 @@ if GUI_AVAILABLE:
 
             export_btn = QPushButton("Export CSV")
             export_btn.clicked.connect(dialog.accept)
-            export_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px;")
+            export_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.SUCCESS_GREEN};
+                    color: white;
+                    padding: 8px 16px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: #0E6B0E;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(export_btn)
 
             cancel_btn = QPushButton("Cancel")
             cancel_btn.clicked.connect(dialog.reject)
-            cancel_btn.setStyleSheet("background-color: #f44336; color: white; padding: 8px;")
+            cancel_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.SECONDARY_GRAY};
+                    color: white;
+                    padding: 8px 16px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: #5A6268;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(cancel_btn)
 
             layout.addLayout(button_layout)
@@ -2910,28 +3660,28 @@ if GUI_AVAILABLE:
             layout = QVBoxLayout(dialog)
 
             title_label = QLabel(f"CSV Export Successful - {export_type}")
-            title_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #2E8B57;")
+            title_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {Colors.SUCCESS_GREEN};")
             layout.addWidget(title_label)
 
             info_label = QLabel(f"Exported {row_count} rows to: {filename}")
-            info_label.setStyleSheet("color: #666; margin-bottom: 10px;")
+            info_label.setStyleSheet(f"color: {Colors.TEXT_GRAY}; margin-bottom: 10px; font-size: 12px;")
             layout.addWidget(info_label)
 
             content_label = QLabel("CSV Contents (select all to copy):")
-            content_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+            content_label.setStyleSheet(f"font-weight: 600; margin-top: 10px; color: {Colors.TEXT_BLACK};")
             layout.addWidget(content_label)
 
             text_area = QTextEdit()
             text_area.setPlainText(csv_content)
             text_area.setReadOnly(True)
-            text_area.setStyleSheet("""
-                QTextEdit {
+            text_area.setStyleSheet(f"""
+                QTextEdit {{
                     font-family: 'Courier New', monospace;
-                    font-size: 10px;
-                    background-color: #f8f8f8;
-                    border: 1px solid #ccc;
-                    padding: 5px;
-                }
+                    font-size: 11px;
+                    background-color: {Colors.NEUTRAL_LIGHT};
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    padding: 8px;
+                }}
             """)
             layout.addWidget(text_area)
 
@@ -2939,24 +3689,76 @@ if GUI_AVAILABLE:
 
             copy_btn = QPushButton("Copy All to Clipboard")
             copy_btn.clicked.connect(lambda: self.copy_csv_to_clipboard(csv_content))
-            copy_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px; font-weight: bold;")
+            copy_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.SUCCESS_GREEN};
+                    color: white;
+                    padding: 8px 16px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: #0E6B0E;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(copy_btn)
 
             save_btn = QPushButton("Save to File")
             save_btn.clicked.connect(lambda: self.save_csv_to_file(csv_content, filename, dialog))
-            save_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px; font-weight: bold;")
+            save_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.WARNING_ORANGE};
+                    color: black;
+                    padding: 8px 16px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: #D39600;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(save_btn)
 
             select_all_btn = QPushButton("Select All Text")
             select_all_btn.clicked.connect(text_area.selectAll)
-            select_all_btn.setStyleSheet("background-color: #2196F3; color: white; padding: 8px;")
+            select_all_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.PRIMARY_BLUE};
+                    color: white;
+                    padding: 8px 16px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: #106EBE;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(select_all_btn)
 
             button_layout.addStretch()
 
             close_btn = QPushButton("Close")
             close_btn.clicked.connect(dialog.accept)
-            close_btn.setStyleSheet("background-color: #f44336; color: white; padding: 8px;")
+            close_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.SECONDARY_GRAY};
+                    color: white;
+                    padding: 8px 16px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: #5A6268;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(close_btn)
 
             layout.addLayout(button_layout)
@@ -3656,7 +4458,7 @@ if GUI_AVAILABLE:
 
             # Title
             title_label = QLabel("Create Chart/Table from Table Data")
-            title_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+            title_label.setStyleSheet(f"font-weight: 600; font-size: 14px; color: {Colors.PRIMARY_BLUE};")
             layout.addWidget(title_label)
 
             # Chart Type Selection
@@ -3690,14 +4492,14 @@ if GUI_AVAILABLE:
 
             # Y-axis filter section
             y_filter_label = QLabel("Y-axis Column Filter:")
-            y_filter_label.setStyleSheet("font-weight: bold; margin-top: 10px;")
+            y_filter_label.setStyleSheet(f"font-weight: 600; margin-top: 10px; color: {Colors.TEXT_BLACK};")
             data_layout.addWidget(y_filter_label)
 
             # Current main GUI filter (read-only info)
             current_main_filter = self.keyword_visibility_input.text().strip()
             if current_main_filter:
                 main_filter_info = QLabel(f"Main GUI filter: '{current_main_filter}'")
-                main_filter_info.setStyleSheet("color: #666; font-size: 10px; font-style: italic;")
+                main_filter_info.setStyleSheet(f"color: {Colors.TEXT_GRAY}; font-size: 11px; font-style: italic;")
                 data_layout.addWidget(main_filter_info)
 
             # Chart dialog filter (editable)
@@ -3726,7 +4528,7 @@ if GUI_AVAILABLE:
 
             # Filter help text
             filter_help = QLabel("Use ',' for OR (any match), '+' for AND (all terms)")
-            filter_help.setStyleSheet("color: #666; font-size: 9px; font-style: italic;")
+            filter_help.setStyleSheet(f"color: {Colors.TEXT_GRAY}; font-size: 10px; font-style: italic;")
             data_layout.addWidget(filter_help)
 
             # Y-axis column list with selection count
@@ -3735,7 +4537,7 @@ if GUI_AVAILABLE:
 
             # Selected count label
             self.y_axis_selected_count_label = QLabel("(0 selected)")
-            self.y_axis_selected_count_label.setStyleSheet("color: #2196F3; font-weight: bold;")
+            self.y_axis_selected_count_label.setStyleSheet(f"color: {Colors.PRIMARY_BLUE}; font-weight: 600;")
             y_axis_header_layout.addWidget(self.y_axis_selected_count_label)
             y_axis_header_layout.addStretch()
             data_layout.addLayout(y_axis_header_layout)
@@ -3866,17 +4668,56 @@ if GUI_AVAILABLE:
 
             create_chart_btn = QPushButton("Create Chart")
             create_chart_btn.clicked.connect(lambda: self.create_chart_from_dialog(dialog))
-            create_chart_btn.setStyleSheet("background-color: #4CAF50; color: white; padding: 8px; font-weight: bold;")
+            create_chart_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.PRIMARY_BLUE};
+                    color: white;
+                    padding: 8px 16px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: #106EBE;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(create_chart_btn)
 
             create_table_btn = QPushButton("Create Table")
             create_table_btn.clicked.connect(lambda: self.create_table_from_chart_dialog(dialog))
-            create_table_btn.setStyleSheet("background-color: #FF9800; color: white; padding: 8px; font-weight: bold;")
+            create_table_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.WARNING_ORANGE};
+                    color: black;
+                    padding: 8px 16px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: #D39600;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             button_layout.addWidget(create_table_btn)
 
             close_btn = QPushButton("Close")
             close_btn.clicked.connect(dialog.close)  # Use close() instead of reject()
-            close_btn.setStyleSheet("background-color: #f44336; color: white; padding: 8px;")
+            close_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.SECONDARY_GRAY};
+                    color: white;
+                    padding: 8px 16px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 12px;
+                    font-weight: 600;
+                }}
+                QPushButton:hover {{
+                    background-color: #5A6268;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
             close_btn.setToolTip("Close this dialog (created charts/tables remain open)")
             button_layout.addWidget(close_btn)
 
@@ -3966,7 +4807,7 @@ if GUI_AVAILABLE:
             if filter_text:
                 # Show filter status
                 filter_status = QLabel(f"Showing {visible_count} of {total_keywords} columns")
-                filter_status.setStyleSheet("color: #2196F3; font-size: 10px;")
+                filter_status.setStyleSheet(f"color: {Colors.PRIMARY_BLUE}; font-size: 11px;")
                 # Note: This label would need to be added to layout dynamically
                 # For simplicity, we'll just update the count
 
@@ -4007,13 +4848,13 @@ if GUI_AVAILABLE:
 
             if count == 0:
                 self.y_axis_selected_count_label.setText("(0 selected)")
-                self.y_axis_selected_count_label.setStyleSheet("color: #999; font-weight: normal;")
+                self.y_axis_selected_count_label.setStyleSheet(f"color: {Colors.TEXT_GRAY}; font-weight: normal;")
             elif count == 1:
                 self.y_axis_selected_count_label.setText("(1 selected)")
-                self.y_axis_selected_count_label.setStyleSheet("color: #2196F3; font-weight: bold;")
+                self.y_axis_selected_count_label.setStyleSheet(f"color: {Colors.PRIMARY_BLUE}; font-weight: 600;")
             else:
                 self.y_axis_selected_count_label.setText(f"({count} selected)")
-                self.y_axis_selected_count_label.setStyleSheet("color: #2196F3; font-weight: bold;")
+                self.y_axis_selected_count_label.setStyleSheet(f"color: {Colors.PRIMARY_BLUE}; font-weight: 600;")
 
             # Also update the selected columns display
             self.update_selected_columns_display()
@@ -4910,6 +5751,27 @@ if GUI_AVAILABLE:
                     # Add pane to main layout
                     scroll_layout.addWidget(pane_widget)
 
+            elif filter_type == 'keyword_group':
+                # Get keyword groups from YAML configuration
+                from ..core.keyword_groups import extract_all_groups_from_yaml
+                values = extract_all_groups_from_yaml(self.yaml_config) if self.yaml_config else []
+
+                # Use vertical layout
+                scroll_layout = QVBoxLayout(scroll_widget)
+                checkboxes = {}
+                for value in values:
+                    # Show group name with keyword count if available
+                    keyword_count = len(self.keyword_groups.get(value, []))
+                    label_text = f"{value} ({keyword_count} keywords)" if keyword_count > 0 else value
+                    checkbox = QCheckBox(label_text)
+                    checkboxes[value] = checkbox  # Key is still the group name
+                    scroll_layout.addWidget(checkbox)
+
+                # Pre-select currently selected groups
+                for group_name in self.selected_keyword_groups:
+                    if group_name in checkboxes:
+                        checkboxes[group_name].setChecked(True)
+
             else:
                 # For other filter types (base_dir, user, block, etc.)
                 values = self.path_components.get(filter_type, [])
@@ -4960,6 +5822,11 @@ if GUI_AVAILABLE:
                 if selected_values:
                     # Update the corresponding combo box
                     combo_text = ", ".join(selected_values)
+
+                    # For keyword groups with multiple selections, add count suffix for clarity
+                    if filter_type == 'keyword_group' and len(selected_values) > 1:
+                        combo_text = f"{combo_text} ({len(selected_values)} groups)"
+
                     if filter_type == 'base_dir':
                         self.project_combo.setCurrentText(combo_text)
                     elif filter_type == 'top_name':
@@ -4979,9 +5846,25 @@ if GUI_AVAILABLE:
                         self.task_combo.setCurrentText(combo_text)
                     elif filter_type == 'status':
                         self.status_combo.setCurrentText(combo_text)
+                    elif filter_type == 'keyword_group':
+                        # Update keyword group selection
+                        self.selected_keyword_groups = set(selected_values)
+                        print(f"DEBUG: Multi-select set keyword groups to: {self.selected_keyword_groups}")
+                        self.keyword_group_combo.setCurrentText(combo_text)
+                        self.update_keyword_group_info_label()
+                        # Apply column visibility filter
+                        self.apply_keyword_column_visibility()
+                        return  # Don't call apply_filters() for keyword groups
 
                     # Apply filters
                     self.apply_filters()
+                else:
+                    # Handle empty selection for keyword_group
+                    if filter_type == 'keyword_group':
+                        self.selected_keyword_groups.clear()
+                        self.keyword_group_combo.setCurrentText("all")
+                        self.update_keyword_group_info_label()
+                        self.apply_keyword_column_visibility()
 
 else:
     HawkeyeDashboard = None

@@ -813,6 +813,15 @@ class MainWindow(QMainWindow):
                 remove_memo_action = menu.addAction("Remove Memo")
                 remove_memo_action.triggered.connect(lambda: self.remove_memo(path))
 
+        # Symlink action (only for single selection)
+        if len(selected_paths) == 1:
+            path = selected_paths[0]
+            # Check if this is a symlink
+            if path.is_symlink():
+                menu.addSeparator()
+                show_real_path_action = menu.addAction("Show Real Path")
+                show_real_path_action.triggered.connect(lambda: self.show_real_path(path))
+
         menu.exec_(self.tree_view.viewport().mapToGlobal(position))
 
     def copy_full_paths_to_clipboard(self, paths: List[Path]):
@@ -856,6 +865,39 @@ class MainWindow(QMainWindow):
             #"Help: Use arrow keys to navigate and Enter to go to the chosen directory."
             ""
         ))
+
+    def show_real_path(self, path: Path):
+        """Show the real path of a symlink with option to copy to clipboard."""
+        if not path.is_symlink():
+            return
+
+        try:
+            real_path = path.resolve()
+
+            msg = QMessageBox(self)
+            msg.setWindowTitle("Symlink Real Path")
+            msg.setText(f"Symlink:\n{path}\n\nReal Path:\n{real_path}")
+            msg.setIcon(QMessageBox.Information)
+
+            # Add Copy button
+            copy_btn = msg.addButton("Copy Real Path", QMessageBox.ActionRole)
+            ok_btn = msg.addButton(QMessageBox.Ok)
+
+            msg.exec_()
+
+            # Check which button was clicked
+            if msg.clickedButton() == copy_btn:
+                clipboard = QApplication.clipboard()
+                clipboard.setText(str(real_path), QClipboard.Clipboard)
+
+                if clipboard.supportsSelection():
+                    clipboard.setText(str(real_path), QClipboard.Selection)
+
+                self.show_status_message("Real path copied to clipboard")
+
+        except Exception as e:
+            QMessageBox.warning(self, "Error", f"Failed to resolve symlink:\n{e}")
+            self.show_status_message(f"Failed to resolve symlink: {e}")
 
     # CORE OPERATIONS (Clone, Trash, Restore, Delete)
 

@@ -32,16 +32,32 @@ class DirectoryScanner(QThread):
         self._cancelled = False
         self.total_dirs_estimated = 0
         self.dirs_processed = 0
+        self._visited_real_paths = set()  # Track visited real paths to prevent circular references
 
     def cancel(self):
         """Cancel the scanning operation."""
         self._cancelled = True
 
-    def _estimate_directory_count(self, path: Path, current_depth: int = 0) -> int:
+    def _estimate_directory_count(self, path: Path, current_depth: int = 0, visited: Optional[set] = None) -> int:
         """Estimate total number of directories to scan for progress calculation."""
         if current_depth >= self.max_depth or self._cancelled:
             return 0
 
+        # Initialize visited set on first call
+        if visited is None:
+            visited = set()
+
+        # Get real path to check for circular references
+        try:
+            real_path = path.resolve()
+        except (OSError, PermissionError):
+            return 0
+
+        # Skip if already visited (prevents circular references)
+        if real_path in visited:
+            return 0
+
+        visited.add(real_path)
         count = 1  # Count current directory
 
         try:
@@ -49,9 +65,10 @@ class DirectoryScanner(QThread):
                 if self._cancelled:
                     break
 
-                if child_path.is_dir() and not child_path.is_symlink():
+                if child_path.is_dir():
+                    # Now recurse into ALL directories including symlinks
                     try:
-                        count += self._estimate_directory_count(child_path, current_depth + 1)
+                        count += self._estimate_directory_count(child_path, current_depth + 1, visited)
                     except (OSError, PermissionError):
                         continue
         except (OSError, PermissionError):
@@ -63,6 +80,18 @@ class DirectoryScanner(QThread):
         """Scan directory hierarchy with progress reporting - OPTIMIZED."""
         if self._cancelled:
             return None
+
+        # Check for circular references using real path
+        try:
+            real_path = path.resolve()
+        except (OSError, PermissionError):
+            return None
+
+        # Skip if already visited (prevents circular references with symlinks)
+        if real_path in self._visited_real_paths:
+            return None
+
+        self._visited_real_paths.add(real_path)
 
         # Update progress every 10 directories to reduce signal overhead
         self.dirs_processed += 1
@@ -114,7 +143,8 @@ class DirectoryScanner(QThread):
 
                     try:
                         # os.scandir caches stat info - very fast
-                        if entry.is_dir(follow_symlinks=False):
+                        # Include symlinks by checking is_dir with follow_symlinks=True
+                        if entry.is_dir(follow_symlinks=True):
                             child_paths.append(Path(entry.path))
                     except (OSError, PermissionError):
                         continue  # Skip inaccessible entries
@@ -125,6 +155,8 @@ class DirectoryScanner(QThread):
                     break
 
                 try:
+                    # Recurse into ALL directories (including symlinks)
+                    # Circular reference protection is handled in _scan_with_progress
                     child_hierarchy = self._scan_with_progress(
                         child_path,
                         hierarchy.max_depth,

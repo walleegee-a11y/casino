@@ -345,9 +345,9 @@ def create_csh_script(run_ver, dest_path):
     script_content = f"""#!/bin/csh -f
 
 if (-e ./common/flow/flow_casino.yaml) then
-    {pond_var}/fm_casino.py -flow ./common/flow/flow_casino.yaml -only $1
-else                                                                               
-    {pond_var}/fm_casino.py -flow ../../common/flow/flow_casino.yaml -only $1
+    {pond_var}/fm_casino.py -flow ./common/flow/flow_casino.yaml -only $1 -terminal xterm
+else
+    {pond_var}/fm_casino.py -flow ../../common/flow/flow_casino.yaml -only $1 -terminal xterm
 endif
 """
     try:
