@@ -1,5 +1,0 @@
-createPlaceBlockage -type hard -name defScreenName -boxlist {{1.0000000000 115.8000000000 88.0800000000 302.0000000000} {1.0000000000 1.0000000000 102.0800000000 115.8000000000}}
-createPlaceBlockage -type hard -name defScreenName -box {1.0000000000 1.0000000000 1.9800000000 302.0000000000}
-createPlaceBlockage -type hard -name defScreenName -box {1.0000000000 1.0000000000 463.9800000000 1.7000000000}
-createPlaceBlockage -type hard -name defScreenName -box {463.0000000000 1.0000000000 463.9800000000 302.0000000000}
-createPlaceBlockage -type hard -name defScreenName -box {1.0000000000 301.3000000000 463.9800000000 302.0000000000}
