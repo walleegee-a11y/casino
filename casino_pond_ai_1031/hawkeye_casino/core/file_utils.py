@@ -11,15 +11,21 @@ class FileAnalyzer:
     """Utilities for reading and analyzing files"""
 
     @staticmethod
-    def read_file_content(file_path: str) -> str:
+    def read_file_content(file_path: str, cache: Optional[dict] = None) -> str:
         """Read file content, handling both regular and gzipped files
 
         Args:
             file_path: Path to file to read
+            cache: Optional dictionary to cache file contents {file_path: content}
 
         Returns:
             File contents as string
         """
+        # OPTIMIZATION: Check cache first
+        if cache is not None and file_path in cache:
+            print(f"DEBUG: Using cached content for: {file_path}")
+            return cache[file_path]
+
         try:
             print(f"DEBUG: Reading file: {file_path}")
             if file_path.endswith('.gz'):
@@ -27,13 +33,17 @@ class FileAnalyzer:
                 with gzip.open(file_path, 'rt', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
                     print(f"DEBUG: Successfully read gzipped file, content length: {len(content)}")
-                    return content
             else:
                 print(f"DEBUG: Reading regular file: {file_path}")
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                     content = f.read()
                     print(f"DEBUG: Successfully read regular file, content length: {len(content)}")
-                    return content
+
+            # OPTIMIZATION: Store in cache
+            if cache is not None:
+                cache[file_path] = content
+
+            return content
         except Exception as e:
             print(f"Error reading file {file_path}: {e}")
             return ""
@@ -41,7 +51,7 @@ class FileAnalyzer:
     @staticmethod
     def extract_keyword(files: List[str], pattern: str, data_type: str,
                        keyword_name: str = "", specific_file: Optional[str] = None,
-                       keyword_config: dict = None) -> Any:
+                       keyword_config: dict = None, cache: Optional[dict] = None) -> Any:
         """Extract keyword value from files using regex pattern
 
         Args:
@@ -51,6 +61,7 @@ class FileAnalyzer:
             keyword_name: Name of keyword being extracted
             specific_file: Optional specific file to search in
             keyword_config: Full keyword configuration dict
+            cache: Optional file content cache dictionary
 
         Returns:
             Extracted value or None if not found
@@ -115,7 +126,7 @@ class FileAnalyzer:
                         return None
 
                     try:
-                        content = FileAnalyzer.read_file_content(target_file)
+                        content = FileAnalyzer.read_file_content(target_file, cache)
                         return FileAnalyzer._extract_from_content(
                             content, pattern, data_type, keyword_name, specific_file, keyword_config)
                     except Exception as e:
@@ -131,7 +142,7 @@ class FileAnalyzer:
         # Search in all files
         for file_path in files:
             try:
-                content = FileAnalyzer.read_file_content(file_path)
+                content = FileAnalyzer.read_file_content(file_path, cache)
                 result = FileAnalyzer._extract_from_content(
                     content, pattern, data_type, keyword_name, specific_file, keyword_config)
                 if result is not None:
@@ -148,39 +159,44 @@ class FileAnalyzer:
         """Extract value from content using pattern and data type
         Args:
             content: File content to search
-            pattern: Regex pattern
+            pattern: Regex pattern (string) or pre-compiled pattern object
             data_type: Type of extraction to perform
             keyword_name: Name of keyword
             specific_file: Specific file being searched
-            keyword_config: Full keyword configuration dict
+            keyword_config: Full keyword configuration dict (may contain '_compiled_pattern')
         Returns:
             Extracted value or None
         """
+        # OPTIMIZATION: Use pre-compiled pattern if available
+        # This avoids recompiling the same pattern hundreds of times
+        compiled_pattern = None
+        if keyword_config and '_compiled_pattern' in keyword_config:
+            compiled_pattern = keyword_config['_compiled_pattern']
+
+        # Pass compiled pattern to extraction methods
         if data_type == 'dynamic_table_row':
-            return FileAnalyzer._extract_dynamic_table(content, pattern, keyword_name, keyword_config)
+            return FileAnalyzer._extract_dynamic_table(content, pattern, keyword_name, keyword_config, compiled_pattern)
         elif data_type == 'sta_timing_row':
-            return FileAnalyzer._extract_sta_timing_row(content, pattern, keyword_config)
+            return FileAnalyzer._extract_sta_timing_row(content, pattern, keyword_config, compiled_pattern)
         elif data_type == 'sta_violation_worst':
-            return FileAnalyzer._extract_sta_violation_worst(content, pattern, keyword_config)
+            return FileAnalyzer._extract_sta_violation_worst(content, pattern, keyword_config, compiled_pattern)
         elif data_type == 'sta_noise_count':
-            return FileAnalyzer._extract_sta_noise_count(content, pattern, keyword_config)
+            return FileAnalyzer._extract_sta_noise_count(content, pattern, keyword_config, compiled_pattern)
         elif data_type == 'sta_noise_worst':
-            return FileAnalyzer._extract_sta_noise_worst(content, pattern, keyword_config)
-        elif data_type == 'sta_noise_count':
-            return FileAnalyzer._extract_noise_violation_count(content, pattern, keyword_config)
+            return FileAnalyzer._extract_sta_noise_worst(content, pattern, keyword_config, compiled_pattern)
         elif data_type == 'count':
-            return FileAnalyzer._extract_count(content, pattern)
+            return FileAnalyzer._extract_count(content, pattern, compiled_pattern)
         elif data_type == 'multiple_values':
-            return FileAnalyzer._extract_multiple_values(content, pattern)
+            return FileAnalyzer._extract_multiple_values(content, pattern, compiled_pattern)
         elif data_type == 'number':
-            return FileAnalyzer._extract_number(content, pattern)
+            return FileAnalyzer._extract_number(content, pattern, compiled_pattern)
         elif data_type == 'status':
-            return FileAnalyzer._extract_status(content, pattern)
+            return FileAnalyzer._extract_status(content, pattern, compiled_pattern)
         else:
-            return FileAnalyzer._extract_string(content, pattern)
+            return FileAnalyzer._extract_string(content, pattern, compiled_pattern)
 
     @staticmethod
-    def _extract_sta_violation_worst(content: str, pattern: str, keyword_config: dict) -> Optional[float]:
+    def _extract_sta_violation_worst(content: str, pattern: str, keyword_config: dict, compiled_pattern=None) -> Optional[float]:
         """Extract worst (maximum absolute value) violation from STA report
 
         Report format example:
@@ -199,6 +215,7 @@ class FileAnalyzer:
                            - violation_type: 'max_tran' or 'max_cap'
                            - mode: mode name
                            - corner: corner name
+            compiled_pattern: Pre-compiled regex pattern (optional, for performance)
 
         Returns:
             Float value of worst (largest absolute value) violation, or 0.0 if no violations
@@ -210,8 +227,11 @@ class FileAnalyzer:
 
             print(f"      DEBUG: Extracting worst {violation_type} violation for {mode}/{corner}")
 
-            # Find all violation values using the pattern
-            matches = re.findall(pattern, content, re.MULTILINE)
+            # Find all violation values using the pattern - use compiled if available
+            if compiled_pattern:
+                matches = compiled_pattern.findall(content)
+            else:
+                matches = re.findall(pattern, content, re.MULTILINE)
 
             if not matches:
                 print(f"      DEBUG: No {violation_type} violations found in report")
@@ -249,7 +269,7 @@ class FileAnalyzer:
             return None
 
     @staticmethod
-    def _extract_sta_noise_count(content: str, pattern: str, keyword_config: dict) -> int:
+    def _extract_sta_noise_count(content: str, pattern: str, keyword_config: dict, compiled_pattern=None) -> int:
         """Count noise violations by parsing table data rows
 
         Report format:
@@ -277,8 +297,11 @@ class FileAnalyzer:
 
             print(f"      DEBUG: Counting {noise_type} violations for {mode}/{corner}")
 
-            # Find the section with this noise_region
-            section_match = re.search(pattern, content, re.MULTILINE | re.IGNORECASE)
+            # Find the section with this noise_region - use compiled pattern if available
+            if compiled_pattern:
+                section_match = compiled_pattern.search(content)
+            else:
+                section_match = re.search(pattern, content, re.MULTILINE | re.IGNORECASE)
             if not section_match:
                 print(f"      DEBUG: No '{noise_type}' section found in report")
                 return 0
@@ -359,7 +382,7 @@ class FileAnalyzer:
 
 
     @staticmethod
-    def _extract_sta_noise_worst(content: str, pattern: str, keyword_config: dict) -> Optional[float]:
+    def _extract_sta_noise_worst(content: str, pattern: str, keyword_config: dict, compiled_pattern=None) -> Optional[float]:
         """Extract worst (maximum absolute value) noise violation slack
 
         Report format:
@@ -387,8 +410,11 @@ class FileAnalyzer:
 
             print(f"      DEBUG: Extracting worst {noise_type} violation for {mode}/{corner}")
 
-            # Find the section with this noise_region
-            section_match = re.search(pattern, content, re.MULTILINE | re.IGNORECASE)
+            # Find the section with this noise_region - use compiled pattern if available
+            if compiled_pattern:
+                section_match = compiled_pattern.search(content)
+            else:
+                section_match = re.search(pattern, content, re.MULTILINE | re.IGNORECASE)
             if not section_match:
                 print(f"      DEBUG: No '{noise_type}' section found in report")
                 return 0.0
@@ -589,7 +615,7 @@ class FileAnalyzer:
             return 0
 
     @staticmethod
-    def _extract_sta_timing_row(content: str, pattern: str, keyword_config: dict) -> Optional[float]:
+    def _extract_sta_timing_row(content: str, pattern: str, keyword_config: dict, compiled_pattern=None) -> Optional[float]:
         """Extract STA timing value from simplified report format
 
         Reports have format:
@@ -659,8 +685,11 @@ class FileAnalyzer:
 
             print(f"      DEBUG: Section content length: {len(section_content)}")
 
-            # Extract the metric line
-            metric_match = re.search(pattern, section_content, re.MULTILINE)
+            # Extract the metric line - use compiled pattern if available
+            if compiled_pattern:
+                metric_match = compiled_pattern.search(section_content)
+            else:
+                metric_match = re.search(pattern, section_content, re.MULTILINE)
 
             if not metric_match:
                 print(f"      DEBUG: Metric pattern not found in section")
@@ -708,7 +737,7 @@ class FileAnalyzer:
 
     @staticmethod
     def _extract_dynamic_table(content: str, pattern: str, keyword_name: str,
-                              keyword_config: dict = None) -> Optional[dict]:
+                              keyword_config: dict = None, compiled_pattern=None) -> Optional[dict]:
         """Extract dynamic table row with flexible columns from timing summary table
 
         Dynamically extracts column names from header row, supporting variable column counts.
@@ -736,8 +765,11 @@ class FileAnalyzer:
             if keyword_config and 'header_pattern' in keyword_config:
                 print(f"      DEBUG: Using custom header pattern from config")
 
-            # Step 2: Find the data line first to determine search context
-            data_match = re.search(pattern, content, re.MULTILINE)
+            # Step 2: Find the data line first to determine search context - use compiled pattern if available
+            if compiled_pattern:
+                data_match = compiled_pattern.search(content)
+            else:
+                data_match = re.search(pattern, content, re.MULTILINE)
             if not data_match:
                 print(f"      Warning: No data line found for pattern: {pattern}")
                 return None
@@ -846,16 +878,22 @@ class FileAnalyzer:
             return None
 
     @staticmethod
-    def _extract_count(content: str, pattern: str) -> int:
+    def _extract_count(content: str, pattern: str, compiled_pattern=None) -> int:
         """Count occurrences of pattern"""
-        matches = re.findall(pattern, content, re.MULTILINE | re.IGNORECASE)
+        if compiled_pattern:
+            matches = compiled_pattern.findall(content)
+        else:
+            matches = re.findall(pattern, content, re.MULTILINE | re.IGNORECASE)
         count = len(matches)
         return count if count > 0 else 0
 
     @staticmethod
-    def _extract_multiple_values(content: str, pattern: str) -> Optional[list]:
+    def _extract_multiple_values(content: str, pattern: str, compiled_pattern=None) -> Optional[list]:
         """Extract multiple values from single line"""
-        all_matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
+        if compiled_pattern:
+            all_matches = list(compiled_pattern.finditer(content))
+        else:
+            all_matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
         if all_matches:
             match = all_matches[-1]  # Get last match
             if match.groups():
@@ -872,9 +910,12 @@ class FileAnalyzer:
         return None
 
     @staticmethod
-    def _extract_number(content: str, pattern: str) -> Optional[float]:
+    def _extract_number(content: str, pattern: str, compiled_pattern=None) -> Optional[float]:
         """Extract numeric value"""
-        all_matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
+        if compiled_pattern:
+            all_matches = list(compiled_pattern.finditer(content))
+        else:
+            all_matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
         if all_matches:
             match = all_matches[-1]  # Get last match
             value = match.group(1) if match.groups() else match.group(0)
@@ -888,9 +929,12 @@ class FileAnalyzer:
         return None
 
     @staticmethod
-    def _extract_status(content: str, pattern: str) -> Optional[str]:
+    def _extract_status(content: str, pattern: str, compiled_pattern=None) -> Optional[str]:
         """Extract status string"""
-        all_matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
+        if compiled_pattern:
+            all_matches = list(compiled_pattern.finditer(content))
+        else:
+            all_matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
         if all_matches:
             match = all_matches[-1]
             value = match.group(1) if match.groups() else match.group(0)
@@ -898,9 +942,12 @@ class FileAnalyzer:
         return None
 
     @staticmethod
-    def _extract_string(content: str, pattern: str) -> Optional[str]:
+    def _extract_string(content: str, pattern: str, compiled_pattern=None) -> Optional[str]:
         """Extract string value"""
-        all_matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
+        if compiled_pattern:
+            all_matches = list(compiled_pattern.finditer(content))
+        else:
+            all_matches = list(re.finditer(pattern, content, re.MULTILINE | re.IGNORECASE))
         if all_matches:
             match = all_matches[-1]
             value = match.group(1) if match.groups() else match.group(0)
