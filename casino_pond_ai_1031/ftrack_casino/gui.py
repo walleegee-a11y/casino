@@ -9,13 +9,15 @@ import re
 import subprocess
 import tempfile
 import logging
+import difflib
 from datetime import datetime
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QDialog, QVBoxLayout, QHBoxLayout, QLabel,
     QListWidget, QAbstractItemView, QTextEdit, QComboBox, QPushButton,
     QFileDialog, QCheckBox, QMessageBox, QTableWidget, QTableWidgetItem,
     QHeaderView, QLineEdit, QGroupBox, QDateEdit, QFormLayout, QTimeEdit,
-    QScrollArea, QShortcut
+    QScrollArea, QShortcut, QTabWidget, QTextBrowser, QFrame, QSizePolicy,
+    QSplitter
 )
 from PyQt5.QtWidgets import QListWidgetItem
 from PyQt5.QtGui import QColor, QFont, QKeySequence
@@ -101,6 +103,1025 @@ TEXT_EXTS = {'.txt', '.py', '.c', '.cpp', '.h', '.hpp', '.log', '.rpt',
              '.yaml', '.yml', '.json', '.md', '.cfg', '.conf', '.csh',
              '.ini', '.xml', '.csv'}
 IMAGE_EXTS = {'.png', '.jpg', '.jpeg', '.bmp', '.gif', '.tiff'}
+
+
+class RichTextDescriptionEditor(QDialog):
+    """Rich text WYSIWYG editor with interactive checkboxes and tables"""
+
+    def __init__(self, current_description, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Edit Description")
+        self.setMinimumSize(1000, 650)
+
+        layout = QVBoxLayout()
+
+        # Rich text editor (single view, WYSIWYG)
+        self.editor = QTextEdit()
+        self.editor.setAcceptRichText(True)
+
+        # Load content - try HTML first, fall back to plain text
+        if current_description.strip().startswith('<'):
+            self.editor.setHtml(current_description)
+        else:
+            # Convert markdown to HTML or use as plain text
+            self.editor.setPlainText(current_description)
+
+        self.editor.textChanged.connect(self.on_text_changed)
+
+        # Install event filter for checkbox clicking and keyboard shortcuts
+        self.editor.viewport().installEventFilter(self)  # For mouse clicks
+        self.editor.installEventFilter(self)  # For keyboard (Tab/Shift+Tab)
+
+        layout.addWidget(self.editor)
+
+        # Formatting toolbar
+        toolbar1 = QHBoxLayout()
+        toolbar2 = QHBoxLayout()
+
+        # Row 1: Text formatting
+        btn_bold = QPushButton("[B] Bold")
+        btn_bold.setMaximumWidth(90)
+        btn_bold.clicked.connect(self.toggle_bold)
+        style_button(btn_bold, "default")
+
+        btn_italic = QPushButton("[I] Italic")
+        btn_italic.setMaximumWidth(90)
+        btn_italic.clicked.connect(self.toggle_italic)
+        style_button(btn_italic, "default")
+
+        btn_underline = QPushButton("[U] Underline")
+        btn_underline.setMaximumWidth(100)
+        btn_underline.clicked.connect(self.toggle_underline)
+        style_button(btn_underline, "default")
+
+        btn_color = QPushButton("[Color]")
+        btn_color.setMaximumWidth(80)
+        btn_color.clicked.connect(self.change_text_color)
+        style_button(btn_color, "default")
+
+        # Font size combo
+        self.font_size_combo = QComboBox()
+        self.font_size_combo.addItems(["8", "10", "12", "14", "16", "18", "20", "24"])
+        self.font_size_combo.setCurrentText("10")
+        self.font_size_combo.setMaximumWidth(60)
+        self.font_size_combo.currentTextChanged.connect(self.change_font_size)
+
+        toolbar1.addWidget(QLabel("Format:"))
+        toolbar1.addWidget(btn_bold)
+        toolbar1.addWidget(btn_italic)
+        toolbar1.addWidget(btn_underline)
+        toolbar1.addWidget(btn_color)
+        toolbar1.addWidget(QLabel("Size:"))
+        toolbar1.addWidget(self.font_size_combo)
+        toolbar1.addStretch()
+
+        # Stats label
+        self.stats_label = QLabel()
+        self.update_stats()
+        toolbar1.addWidget(self.stats_label)
+
+        # Row 2: Lists, tables, and checkboxes
+        btn_bullet = QPushButton("[-] Bullet List")
+        btn_bullet.setMaximumWidth(110)
+        btn_bullet.clicked.connect(self.insert_bullet_list)
+        style_button(btn_bullet, "default")
+
+        btn_numbered = QPushButton("[1] Numbered List")
+        btn_numbered.setMaximumWidth(130)
+        btn_numbered.clicked.connect(self.insert_numbered_list)
+        style_button(btn_numbered, "default")
+
+        btn_checkbox = QPushButton("[ ] Task Item")
+        btn_checkbox.setMaximumWidth(110)
+        btn_checkbox.clicked.connect(self.insert_checkbox)
+        style_button(btn_checkbox, "default")
+
+        btn_table = QPushButton("[Table]")
+        btn_table.setMaximumWidth(80)
+        btn_table.clicked.connect(self.insert_table)
+        style_button(btn_table, "default")
+
+        btn_clear = QPushButton("[Clear Format]")
+        btn_clear.setMaximumWidth(110)
+        btn_clear.clicked.connect(self.clear_formatting)
+        style_button(btn_clear, "gray")
+
+        toolbar2.addWidget(btn_bullet)
+        toolbar2.addWidget(btn_numbered)
+        toolbar2.addWidget(btn_checkbox)
+        toolbar2.addWidget(btn_table)
+        toolbar2.addWidget(btn_clear)
+        toolbar2.addStretch()
+
+        layout.addLayout(toolbar1)
+        layout.addLayout(toolbar2)
+
+        # Action buttons
+        btn_layout = QHBoxLayout()
+        btn_save = QPushButton("[Save]")
+        btn_save.clicked.connect(self.accept)
+        style_button(btn_save, "success")
+
+        btn_cancel = QPushButton("[Cancel]")
+        btn_cancel.clicked.connect(self.reject)
+        style_button(btn_cancel, "gray")
+
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_save)
+        btn_layout.addWidget(btn_cancel)
+
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+
+    def eventFilter(self, obj, event):
+        """Handle mouse clicks on checkboxes to toggle them, and keyboard shortcuts"""
+        from PyQt5.QtCore import QEvent, Qt
+        from PyQt5.QtGui import QMouseEvent, QTextCursor, QKeyEvent
+
+        # Handle keyboard events for Tab/Shift+Tab in lists and Enter for checkboxes
+        if obj == self.editor and event.type() == QEvent.KeyPress:
+            if isinstance(event, QKeyEvent):
+                cursor = self.editor.textCursor()
+                current_list = cursor.currentList()
+
+                # Handle Tab - indent list item OR checkbox line
+                if event.key() == Qt.Key_Tab:
+                    # Check if in a list
+                    if current_list:
+                        cursor.beginEditBlock()
+                        list_format = current_list.format()
+                        list_format.setIndent(list_format.indent() + 1)
+                        current_list.setFormat(list_format)
+                        cursor.endEditBlock()
+                        return True
+                    else:
+                        # Check if on a checkbox line
+                        cursor.select(QTextCursor.LineUnderCursor)
+                        line_text = cursor.selectedText()
+                        cursor.clearSelection()
+                        stripped = line_text.lstrip()
+                        if stripped.startswith('[ ] ') or stripped.startswith('[v] '):
+                            # Add indent to checkbox line
+                            cursor = self.editor.textCursor()
+                            cursor.movePosition(QTextCursor.StartOfBlock)
+                            cursor.insertText("  ")  # Add 2 spaces indent
+                            return True
+
+                # Handle Shift+Tab - outdent list item OR checkbox line
+                if event.key() == Qt.Key_Backtab:
+                    # Check if in a list
+                    if current_list:
+                        cursor.beginEditBlock()
+                        list_format = current_list.format()
+                        if list_format.indent() > 0:
+                            list_format.setIndent(list_format.indent() - 1)
+                            current_list.setFormat(list_format)
+                        cursor.endEditBlock()
+                        return True
+                    else:
+                        # Check if on a checkbox line
+                        cursor.select(QTextCursor.LineUnderCursor)
+                        line_text = cursor.selectedText()
+                        cursor.clearSelection()
+                        if line_text.startswith('  '):  # Has indent
+                            stripped = line_text.lstrip()
+                            if stripped.startswith('[ ] ') or stripped.startswith('[v] '):
+                                # Remove 2 spaces indent from checkbox line
+                                cursor = self.editor.textCursor()
+                                cursor.movePosition(QTextCursor.StartOfBlock)
+                                cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 2)
+                                if cursor.selectedText() == "  ":
+                                    cursor.removeSelectedText()
+                                return True
+
+                # Handle Enter for checkbox auto-continuation
+                if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                    # Get current line text
+                    cursor.select(QTextCursor.LineUnderCursor)
+                    line_text = cursor.selectedText()
+                    cursor.clearSelection()
+
+                    # Check if line starts with checkbox pattern
+                    stripped = line_text.lstrip()
+                    if stripped.startswith('[ ] ') or stripped.startswith('[v] '):
+                        # Get indentation of current line
+                        indent = line_text[:len(line_text) - len(stripped)]
+
+                        # Check if checkbox line is empty (just checkbox, no text)
+                        checkbox_content = stripped[4:].strip()  # Text after "[ ] " or "[v] "
+
+                        if not checkbox_content:
+                            # Empty checkbox line - exit checkbox mode (don't create next)
+                            # Just insert normal newline
+                            cursor = self.editor.textCursor()
+                            cursor.insertText("\n")
+                            return True
+                        else:
+                            # Non-empty checkbox line - auto-create next checkbox
+                            cursor = self.editor.textCursor()
+                            cursor.insertText("\n" + indent + "[ ] ")
+                            return True
+
+        # Handle mouse clicks on checkboxes
+        if obj == self.editor.viewport() and event.type() == QEvent.MouseButtonRelease:
+            if isinstance(event, QMouseEvent):
+                # Get cursor position at click
+                cursor = self.editor.cursorForPosition(event.pos())
+
+                # Get current line text
+                cursor.select(QTextCursor.LineUnderCursor)
+                line_text = cursor.selectedText()
+                cursor.clearSelection()
+
+                # Get cursor position within the line
+                line_start_pos = cursor.block().position()
+                click_pos = self.editor.cursorForPosition(event.pos()).position()
+                pos_in_line = click_pos - line_start_pos
+
+                # Check for checkbox patterns "[ ]" or "[v]" near click position
+                # Look for pattern within 3 characters of click
+                for i in range(max(0, pos_in_line - 3), min(len(line_text) - 2, pos_in_line + 3)):
+                    if i + 2 < len(line_text):
+                        pattern = line_text[i:i+3]
+                        if pattern == '[ ]' or pattern == '[v]':
+                            # Found checkbox pattern near click - toggle it
+                            new_pattern = '[v]' if pattern == '[ ]' else '[ ]'
+
+                            # Replace the pattern
+                            cursor = self.editor.textCursor()
+                            cursor.setPosition(line_start_pos + i)
+                            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 3)
+                            cursor.insertText(new_pattern)
+
+                            # Don't auto-create next checkbox
+                            # User will press Enter and click button again if they want more
+
+                            return True  # Event handled
+
+        return super().eventFilter(obj, event)
+
+    def on_text_changed(self):
+        """Update stats on text change"""
+        self.update_stats()
+
+    def update_stats(self):
+        """Update character and word count"""
+        text = self.editor.toPlainText()
+        char_count = len(text)
+        word_count = len(text.split())
+        line_count = len(text.splitlines())
+        self.stats_label.setText(
+            f"Stats: {char_count} chars, {word_count} words, {line_count} lines"
+        )
+
+    def toggle_bold(self):
+        """Toggle bold formatting"""
+        fmt = self.editor.currentCharFormat()
+        fmt.setFontWeight(QFont.Normal if fmt.fontWeight() == QFont.Bold else QFont.Bold)
+        self.editor.mergeCurrentCharFormat(fmt)
+        self.editor.setFocus()
+
+    def toggle_italic(self):
+        """Toggle italic formatting"""
+        fmt = self.editor.currentCharFormat()
+        fmt.setFontItalic(not fmt.fontItalic())
+        self.editor.mergeCurrentCharFormat(fmt)
+        self.editor.setFocus()
+
+    def toggle_underline(self):
+        """Toggle underline formatting"""
+        fmt = self.editor.currentCharFormat()
+        fmt.setFontUnderline(not fmt.fontUnderline())
+        self.editor.mergeCurrentCharFormat(fmt)
+        self.editor.setFocus()
+
+    def change_text_color(self):
+        """Open color picker and change text color"""
+        from PyQt5.QtWidgets import QColorDialog
+        color = QColorDialog.getColor()
+        if color.isValid():
+            fmt = self.editor.currentCharFormat()
+            fmt.setForeground(color)
+            self.editor.mergeCurrentCharFormat(fmt)
+        self.editor.setFocus()
+
+    def change_font_size(self, size):
+        """Change font size"""
+        try:
+            fmt = self.editor.currentCharFormat()
+            fmt.setFontPointSize(int(size))
+            self.editor.mergeCurrentCharFormat(fmt)
+        except ValueError:
+            pass
+        self.editor.setFocus()
+
+    def insert_bullet_list(self):
+        """Insert or toggle bullet list"""
+        from PyQt5.QtGui import QTextListFormat
+        cursor = self.editor.textCursor()
+        list_format = QTextListFormat()
+        list_format.setStyle(QTextListFormat.ListDisc)
+        cursor.insertList(list_format)
+        self.editor.setFocus()
+
+    def insert_numbered_list(self):
+        """Insert or toggle numbered list"""
+        from PyQt5.QtGui import QTextListFormat
+        cursor = self.editor.textCursor()
+        list_format = QTextListFormat()
+        list_format.setStyle(QTextListFormat.ListDecimal)
+        cursor.insertList(list_format)
+        self.editor.setFocus()
+
+    def insert_checkbox(self):
+        """Insert an interactive checkbox (plain text, no bullet)"""
+        cursor = self.editor.textCursor()
+
+        # Just insert checkbox at current position (no list structure)
+        # This avoids the bullet marker
+        cursor.insertText("[ ] ")
+
+        self.editor.setFocus()
+
+    def insert_table(self):
+        """Insert a table"""
+        from PyQt5.QtWidgets import QInputDialog
+
+        # Ask for dimensions
+        rows, ok1 = QInputDialog.getInt(self, "Insert Table", "Number of rows:", 3, 1, 20)
+        if not ok1:
+            return
+
+        cols, ok2 = QInputDialog.getInt(self, "Insert Table", "Number of columns:", 3, 1, 10)
+        if not ok2:
+            return
+
+        cursor = self.editor.textCursor()
+
+        # Create table format
+        from PyQt5.QtGui import QTextTableFormat, QTextLength
+        table_format = QTextTableFormat()
+        table_format.setBorder(1)
+        table_format.setCellPadding(4)
+        table_format.setCellSpacing(0)
+        table_format.setWidth(QTextLength(QTextLength.PercentageLength, 100))
+
+        # Insert table
+        table = cursor.insertTable(rows, cols, table_format)
+        self.editor.setFocus()
+
+    def clear_formatting(self):
+        """Clear all formatting from selected text"""
+        cursor = self.editor.textCursor()
+        if cursor.hasSelection():
+            # Create plain format
+            from PyQt5.QtGui import QTextCharFormat
+            plain_format = QTextCharFormat()
+            cursor.mergeCharFormat(plain_format)
+        self.editor.setFocus()
+
+    def get_description(self):
+        """Get the edited description as plain text"""
+        return self.editor.toPlainText()
+
+    def get_description_html(self):
+        """Get the edited description as HTML"""
+        return self.editor.toHtml()
+
+    def get_description_markdown(self):
+        """Convert HTML to markdown for backward compatibility"""
+        try:
+            import html2text
+            h = html2text.HTML2Text()
+            h.ignore_links = False
+            h.ignore_images = False
+            h.body_width = 0  # Don't wrap lines
+            html = self.editor.toHtml()
+            markdown_text = h.handle(html)
+            return markdown_text.strip()
+        except ImportError:
+            # Fallback to plain text if html2text not installed
+            return self.editor.toPlainText()
+
+
+# Keep old class name as alias for backward compatibility
+MarkdownDescriptionEditor = RichTextDescriptionEditor
+
+
+class DescriptionHistoryDialog(QDialog):
+    """Enhanced history dialog with visual diffs, timeline view, and version restoration"""
+
+    def __init__(self, issue_data, yaml_path, parent=None):
+        super().__init__(parent)
+        self.issue_data = issue_data
+        self.yaml_path = yaml_path
+        self.current_description = issue_data.get('description', '')
+        self.current_description_html = issue_data.get('description_html', '')
+        self.history = issue_data.get('description_history', [])
+
+        self.setWindowTitle(f"Description History - {issue_data.get('id', '')}")
+        self.setMinimumSize(950, 700)
+
+        layout = QVBoxLayout()
+
+        # Header with search and info
+        header_layout = QHBoxLayout()
+        title_label = QLabel(f"<b>Change History ({len(self.history)} versions)</b>")
+        header_layout.addWidget(title_label)
+        header_layout.addStretch()
+
+        self.search_box = QLineEdit()
+        self.search_box.setPlaceholderText("Search history...")
+        self.search_box.setMaximumWidth(250)
+        self.search_box.textChanged.connect(self.filter_history)
+        header_layout.addWidget(self.search_box)
+
+        layout.addLayout(header_layout)
+
+        # Horizontal splitter for 3-column layout
+        splitter = QSplitter(Qt.Horizontal)
+
+        # Left panel: Version list
+        self.version_list = QListWidget()
+        self.version_list.setMinimumWidth(200)
+        self.version_list.setMaximumWidth(350)
+        self.version_list.setStyleSheet("""
+            QListWidget {
+                background-color: #f6f8fa;
+                border: 1px solid #d0d7de;
+                border-radius: 6px;
+                font-size: 10px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #d0d7de;
+            }
+            QListWidget::item:hover {
+                background-color: #e6f2ff;
+                color: #000000;
+            }
+            QListWidget::item:selected {
+                background-color: #0969da;
+                color: white;
+            }
+            QListWidget::item:selected:hover {
+                background-color: #0550ae;
+                color: white;
+            }
+        """)
+        self.version_list.currentRowChanged.connect(self.on_version_selected)
+
+        # Middle panel: Current version (always visible)
+        middle_panel = QWidget()
+        middle_layout = QVBoxLayout(middle_panel)
+        middle_layout.setContentsMargins(5, 0, 5, 0)
+
+        # Current version header
+        current_header = QLabel("[CURRENT] Version")
+        current_header.setStyleSheet("""
+            QLabel {
+                background-color: #28a745;
+                color: white;
+                padding: 10px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+        """)
+        current_header.setAlignment(Qt.AlignCenter)
+        middle_layout.addWidget(current_header)
+
+        # Current version content
+        self.current_display = QTextBrowser()
+        self.current_display.setStyleSheet("""
+            QTextBrowser {
+                background-color: #f0fff4;
+                border: 2px solid #28a745;
+                border-radius: 6px;
+                padding: 12px;
+                font-family: 'Consolas', monospace;
+                font-size: 10px;
+            }
+        """)
+        # Display HTML if available, otherwise plain text
+        if self.current_description_html:
+            self.current_display.setHtml(self.current_description_html)
+        else:
+            self.current_display.setPlainText(self.current_description)
+        middle_layout.addWidget(self.current_display)
+
+        # Right panel: Selected version viewer
+        right_panel = QWidget()
+        right_layout = QVBoxLayout(right_panel)
+        right_layout.setContentsMargins(5, 0, 0, 0)
+
+        # Selected version info header
+        self.info_label = QLabel("Select a version from the list")
+        self.info_label.setStyleSheet("""
+            QLabel {
+                background-color: #0969da;
+                color: white;
+                padding: 10px;
+                border-radius: 6px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+        """)
+        self.info_label.setAlignment(Qt.AlignCenter)
+        self.info_label.setWordWrap(True)
+        right_layout.addWidget(self.info_label)
+
+        # Selected version content display
+        self.content_display = QTextBrowser()
+        self.content_display.setStyleSheet("""
+            QTextBrowser {
+                background-color: white;
+                border: 1px solid #d0d7de;
+                border-radius: 6px;
+                padding: 12px;
+                font-family: 'Consolas', monospace;
+                font-size: 10px;
+            }
+        """)
+        right_layout.addWidget(self.content_display)
+
+        # Action buttons for selected version
+        action_layout = QHBoxLayout()
+
+        self.btn_restore_version = QPushButton("[Restore] Selected")
+        self.btn_restore_version.setEnabled(False)
+        style_button(self.btn_restore_version, "blue")
+        self.btn_restore_version.clicked.connect(self.on_restore_clicked)
+
+        self.btn_show_full_diff = QPushButton("[Toggle] Diff/Full")
+        self.btn_show_full_diff.setEnabled(False)
+        style_button(self.btn_show_full_diff, "action")
+        self.btn_show_full_diff.clicked.connect(self.on_toggle_diff)
+
+        action_layout.addWidget(self.btn_show_full_diff)
+        action_layout.addWidget(self.btn_restore_version)
+        action_layout.addStretch()
+
+        right_layout.addLayout(action_layout)
+
+        # Add panels to splitter (3 columns)
+        splitter.addWidget(self.version_list)
+        splitter.addWidget(middle_panel)
+        splitter.addWidget(right_panel)
+
+        # Set relative sizes: List=1, Current=2, Selected=2
+        splitter.setStretchFactor(0, 1)  # Version list
+        splitter.setStretchFactor(1, 2)  # Current version (middle)
+        splitter.setStretchFactor(2, 2)  # Selected version (right)
+
+        layout.addWidget(splitter)
+
+        # Populate version list
+        self.showing_diff = True  # Track whether showing diff or full text
+        self.populate_version_list()
+
+        # Bottom buttons
+        btn_layout = QHBoxLayout()
+
+        btn_export = QPushButton("[Export] History")
+        btn_export.clicked.connect(self.export_history)
+        style_button(btn_export, "action")
+
+        btn_close = QPushButton("[Close]")
+        btn_close.clicked.connect(self.close)
+        style_button(btn_close, "gray")
+
+        btn_layout.addWidget(btn_export)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_close)
+
+        layout.addLayout(btn_layout)
+        self.setLayout(layout)
+
+    def populate_version_list(self):
+        """Populate version list in left panel"""
+        self.version_list.clear()
+
+        # Add current version first
+        current_item = QListWidgetItem("[CURRENT] Version")
+        current_item.setData(Qt.UserRole, {
+            'is_current': True,
+            'description': self.current_description,
+            'description_html': self.current_description_html,
+            'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'user': getpass.getuser()
+        })
+        current_item.setBackground(QColor("#e6ffec"))
+        current_item.setForeground(QColor("#28a745"))
+        self.version_list.addItem(current_item)
+
+        # Add historical versions (reverse chronological)
+        for idx, entry in enumerate(reversed(self.history)):
+            version_number = len(self.history) - idx
+            timestamp = entry.get('timestamp', '')
+            user = entry.get('user', '')
+            restored_from = entry.get('restored_from')
+
+            # Create list item text
+            item_text = f"Version #{version_number}\n{timestamp}\nUser: {user}"
+            if restored_from:
+                item_text += f"\n[Restored]"
+
+            list_item = QListWidgetItem(item_text)
+            list_item.setData(Qt.UserRole, {
+                'is_current': False,
+                'version_number': version_number,
+                'entry': entry,
+                'description': entry.get('old_description', ''),
+                'description_html': entry.get('old_description_html', ''),
+                'timestamp': timestamp,
+                'user': user,
+                'restored_from': restored_from
+            })
+            self.version_list.addItem(list_item)
+
+        # Select first historical version by default (to show comparison)
+        # Current version is always visible in middle panel
+        if self.version_list.count() > 1:
+            self.version_list.setCurrentRow(1)  # First historical version
+        elif self.version_list.count() > 0:
+            self.version_list.setCurrentRow(0)  # Current version if no history
+
+    def on_version_selected(self, row):
+        """Handle version selection from list (3-column view)"""
+        if row < 0 or row >= self.version_list.count():
+            return
+
+        item = self.version_list.item(row)
+        data = item.data(Qt.UserRole)
+
+        if data['is_current']:
+            # Current version selected - show info in right panel
+            self.info_label.setText(
+                f"[CURRENT] Version Selected\n"
+                f"Time: {data['timestamp']} | User: {data['user']}"
+            )
+            self.btn_restore_version.setEnabled(False)
+            self.btn_show_full_diff.setEnabled(False)
+
+            # Show message in right panel
+            self.content_display.setHtml("""
+                <div style='text-align: center; padding: 40px; color: #666;'>
+                    <h2 style='color: #28a745;'>[CURRENT] Version</h2>
+                    <p>This is the active version.</p>
+                    <p>The current content is displayed in the middle panel.</p>
+                    <hr style='margin: 20px 0; border: 1px solid #ddd;'>
+                    <p><i>Select a historical version from the list to compare with current.</i></p>
+                </div>
+            """)
+            self.showing_diff = False
+
+        else:
+            # Historical version selected - show in right panel for comparison
+            version_num = data['version_number']
+            restored_info = f"\n[Restored from {data['restored_from']}]" if data['restored_from'] else ""
+
+            self.info_label.setText(
+                f"Version #{version_num} (Historical)\n"
+                f"Time: {data['timestamp']} | User: {data['user']}{restored_info}"
+            )
+            self.btn_restore_version.setEnabled(True)
+            self.btn_show_full_diff.setEnabled(True)
+
+            # Show diff by default (comparing with current in middle panel)
+            self.showing_diff = True
+            self.show_version_diff(data)
+
+        # Store current selection data for actions
+        self.selected_version_data = data
+
+    def show_version_diff(self, data):
+        """Show diff for selected version"""
+        old_desc = data['description']
+        diff_html = self.generate_diff_html(old_desc, self.current_description, data['timestamp'])
+        self.content_display.setHtml(diff_html)
+
+    def show_version_full_text(self, data):
+        """Show full text for selected version"""
+        # Display HTML if available, otherwise plain text
+        html = data.get('description_html', '')
+        if html:
+            self.content_display.setHtml(html)
+        else:
+            self.content_display.setPlainText(data['description'])
+
+    def on_toggle_diff(self):
+        """Toggle between diff view and full text view"""
+        if not hasattr(self, 'selected_version_data'):
+            return
+
+        data = self.selected_version_data
+        if data['is_current']:
+            return  # No diff for current version
+
+        self.showing_diff = not self.showing_diff
+
+        if self.showing_diff:
+            self.show_version_diff(data)
+        else:
+            self.show_version_full_text(data)
+
+    def on_restore_clicked(self):
+        """Restore the selected version"""
+        if not hasattr(self, 'selected_version_data'):
+            return
+
+        data = self.selected_version_data
+        if data['is_current']:
+            return  # Can't restore current version
+
+        # Call the existing restore_version method
+        self.restore_version(data['entry'], data['version_number'])
+
+    def generate_diff_html(self, old_text, new_text, change_time=""):
+        """Generate color-coded HTML diff using difflib"""
+        old_lines = old_text.splitlines()
+        new_lines = new_text.splitlines()
+
+        differ = difflib.Differ()
+        diff = list(differ.compare(old_lines, new_lines))
+
+        # Count changes
+        added_count = sum(1 for line in diff if line.startswith('+ '))
+        removed_count = sum(1 for line in diff if line.startswith('- '))
+
+        html = f"""
+        <style>
+            body {{
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 11px;
+                line-height: 1.5;
+            }}
+            .diff-header {{
+                background-color: #0969da;
+                color: white;
+                padding: 8px 12px;
+                border-radius: 4px;
+                margin-bottom: 12px;
+                font-weight: bold;
+            }}
+            .stats {{
+                font-size: 10px;
+                color: #57606a;
+                margin-bottom: 8px;
+                padding: 6px;
+                background-color: #f6f8fa;
+                border-radius: 3px;
+            }}
+            .added {{
+                background-color: #ccffd8;
+                color: #116329;
+                padding: 2px 6px;
+                margin: 1px 0;
+                border-left: 3px solid #28a745;
+            }}
+            .removed {{
+                background-color: #ffd7d5;
+                color: #82071e;
+                padding: 2px 6px;
+                margin: 1px 0;
+                border-left: 3px solid #d32f2f;
+            }}
+            .unchanged {{
+                color: #57606a;
+                padding: 2px 6px;
+                margin: 1px 0;
+            }}
+        </style>
+        <div class="diff-header">Unified Diff View</div>
+        <div class="stats">
+            Changes: <span style="color: #28a745;">+{added_count} additions</span>,
+            <span style="color: #d32f2f;">-{removed_count} deletions</span>
+        </div>
+        <div>
+        """
+
+        for line in diff:
+            if line.startswith('- '):
+                html += f"<div class='removed'>− {self.escape_html(line[2:])}</div>"
+            elif line.startswith('+ '):
+                html += f"<div class='added'>+ {self.escape_html(line[2:])}</div>"
+            elif line.startswith('  '):
+                html += f"<div class='unchanged'>  {self.escape_html(line[2:])}</div>"
+            # Skip '? ' diff hints for cleaner output
+
+        html += "</div>"
+        return html
+
+    def escape_html(self, text):
+        """Escape HTML special characters"""
+        return (text.replace('&', '&amp;')
+                   .replace('<', '&lt;')
+                   .replace('>', '&gt;')
+                   .replace('"', '&quot;')
+                   .replace("'", '&#39;'))
+
+    def restore_version(self, entry, version_number):
+        """Restore a previous version with user confirmation"""
+        old_description = entry.get('old_description', '')
+
+        # Confirmation dialog
+        reply = QMessageBox.question(
+            self,
+            "Restore Version",
+            f"<b>Restore version #{version_number}?</b><br><br>"
+            f"<b>Modified:</b> {entry.get('timestamp')}<br>"
+            f"<b>By:</b> {entry.get('user')}<br><br>"
+            f"This will create a new history entry preserving the full history.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            # Create new history entry for restoration
+            history_entry = {
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'user': getpass.getuser(),
+                'old_description': self.current_description,
+                'restored_from': f"Version #{version_number} ({entry.get('timestamp')})"
+            }
+
+            # Update issue data
+            self.issue_data['description'] = old_description
+            self.issue_data['description_history'].append(history_entry)
+
+            # Save to YAML file
+            try:
+                with open(self.yaml_path, 'w') as f:
+                    yaml.safe_dump(self.issue_data, f)
+
+                QMessageBox.information(
+                    self,
+                    "[OK] Success",
+                    f"Version #{version_number} restored successfully!"
+                )
+
+                # Refresh the dialog to show new state
+                self.current_description = old_description
+                self.history = self.issue_data['description_history']
+                self.populate_version_list()
+
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "[ERROR] Failed",
+                    f"Failed to restore version:<br>{str(e)}"
+                )
+
+    def filter_history(self, search_text):
+        """Filter version list by search text"""
+        search_text = search_text.lower().strip()
+
+        # Show/hide items based on search
+        for i in range(self.version_list.count()):
+            item = self.version_list.item(i)
+            data = item.data(Qt.UserRole)
+
+            if not search_text:
+                # Show all if no search text
+                item.setHidden(False)
+            else:
+                # Search in timestamp, user, and description
+                timestamp = data.get('timestamp', '').lower()
+                user = data.get('user', '').lower()
+                description = data.get('description', '').lower()
+
+                # Current version is always visible or check match
+                if data['is_current']:
+                    matches = search_text in timestamp or search_text in user or search_text in description
+                else:
+                    matches = (search_text in timestamp or
+                              search_text in user or
+                              search_text in description)
+
+                item.setHidden(not matches)
+
+    def export_history(self):
+        """Export full history to HTML file"""
+        try:
+            # Create HTML export
+            html_content = f"""
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <title>History Export - {self.issue_data.get('id', '')}</title>
+                <style>
+                    body {{
+                        font-family: -apple-system, sans-serif;
+                        max-width: 1000px;
+                        margin: 40px auto;
+                        padding: 20px;
+                        background: #f6f8fa;
+                    }}
+                    .header {{
+                        background: #0969da;
+                        color: white;
+                        padding: 20px;
+                        border-radius: 8px;
+                        margin-bottom: 30px;
+                    }}
+                    .current {{
+                        background: #e6ffec;
+                        border: 2px solid #28a745;
+                        padding: 20px;
+                        border-radius: 8px;
+                        margin-bottom: 20px;
+                    }}
+                    .version {{
+                        background: white;
+                        border: 1px solid #d0d7de;
+                        padding: 20px;
+                        border-radius: 8px;
+                        margin-bottom: 20px;
+                    }}
+                    .version-header {{
+                        font-weight: bold;
+                        color: #0969da;
+                        margin-bottom: 10px;
+                    }}
+                    .meta {{
+                        color: #57606a;
+                        font-size: 14px;
+                        margin-bottom: 15px;
+                    }}
+                    pre {{
+                        background: #f6f8fa;
+                        padding: 15px;
+                        border-radius: 6px;
+                        overflow-x: auto;
+                    }}
+                </style>
+            </head>
+            <body>
+                <div class="header">
+                    <h1>Description History Export</h1>
+                    <p><b>Issue ID:</b> {self.issue_data.get('id', '')}</p>
+                    <p><b>Title:</b> {self.issue_data.get('title', '')}</p>
+                    <p><b>Exported:</b> {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}</p>
+                </div>
+
+                <div class="current">
+                    <h2>[CURRENT] Version</h2>
+                    <pre>{self.escape_html(self.current_description)}</pre>
+                </div>
+            """
+
+            # Add history entries
+            for idx, entry in enumerate(reversed(self.history)):
+                version_num = len(self.history) - idx
+                html_content += f"""
+                <div class="version">
+                    <div class="version-header">Version #{version_num}</div>
+                    <div class="meta">
+                        Time: {entry.get('timestamp', '')} |
+                        User: {entry.get('user', '')}
+                """
+
+                if entry.get('restored_from'):
+                    html_content += f" | [Restored from {entry.get('restored_from')}]"
+
+                html_content += f"""
+                    </div>
+                    <pre>{self.escape_html(entry.get('old_description', ''))}</pre>
+                </div>
+                """
+
+            html_content += """
+            </body>
+            </html>
+            """
+
+            # Save to file
+            filename, _ = QFileDialog.getSaveFileName(
+                self,
+                "Export History",
+                f"history_{self.issue_data.get('id', 'unknown')}.html",
+                "HTML Files (*.html)"
+            )
+
+            if filename:
+                with open(filename, 'w', encoding='utf-8') as f:
+                    f.write(html_content)
+
+                QMessageBox.information(
+                    self,
+                    "[OK] Success",
+                    f"History exported successfully to:<br>{filename}"
+                )
+
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "[ERROR] Failed",
+                f"Failed to export history:<br>{str(e)}"
+            )
+
 
 class FastTrackGUI(QWidget):
     STATUS_OPTIONS = ["Open", "In Progress", "Resolved", "Closed"]
@@ -265,7 +1286,40 @@ class FastTrackGUI(QWidget):
         self.title_edit = QTextEdit(); self.title_edit.setFixedHeight(40)
         right_content.addWidget(self.title_edit)
         right_content.addWidget(QLabel("Description:"))
-        self.desc_edit = QTextEdit(); right_content.addWidget(self.desc_edit)
+
+        # Description formatting toolbar
+        desc_toolbar = QHBoxLayout()
+
+        btn_bullet = QPushButton("[-] Bullet")
+        btn_bullet.setMaximumWidth(90)
+        btn_bullet.clicked.connect(lambda: self._insert_desc_bullet())
+        style_button(btn_bullet, "default")
+
+        btn_numbered = QPushButton("[1] Numbered")
+        btn_numbered.setMaximumWidth(100)
+        btn_numbered.clicked.connect(lambda: self._insert_desc_numbered())
+        style_button(btn_numbered, "default")
+
+        btn_task = QPushButton("[ ] Task")
+        btn_task.setMaximumWidth(90)
+        btn_task.clicked.connect(lambda: self._insert_desc_task())
+        style_button(btn_task, "default")
+
+        desc_toolbar.addWidget(btn_bullet)
+        desc_toolbar.addWidget(btn_numbered)
+        desc_toolbar.addWidget(btn_task)
+        desc_toolbar.addStretch()
+
+        right_content.addLayout(desc_toolbar)
+
+        self.desc_edit = QTextEdit()
+        self.desc_edit.setAcceptRichText(True)
+
+        # Install event filter for list keyboard shortcuts
+        self.desc_edit.viewport().installEventFilter(self)
+        self.desc_edit.installEventFilter(self)
+
+        right_content.addWidget(self.desc_edit)
         right_content.addWidget(QLabel("Severity:"))
         self.severity_combo = QComboBox(); self.severity_combo.addItems(["Critical","Major","Minor","Enhancement","Info"])
         right_content.addWidget(self.severity_combo)
@@ -569,6 +1623,141 @@ class FastTrackGUI(QWidget):
                 f"Failed to add dropped files:\n{str(e)}")
             logging.exception("Error in _add_dropped_files")
 
+    def _insert_desc_bullet(self):
+        """Insert bullet list in submit form description"""
+        from PyQt5.QtGui import QTextListFormat
+        cursor = self.desc_edit.textCursor()
+        list_format = QTextListFormat()
+        list_format.setStyle(QTextListFormat.ListDisc)
+        cursor.insertList(list_format)
+        self.desc_edit.setFocus()
+
+    def _insert_desc_numbered(self):
+        """Insert numbered list in submit form description"""
+        from PyQt5.QtGui import QTextListFormat
+        cursor = self.desc_edit.textCursor()
+        list_format = QTextListFormat()
+        list_format.setStyle(QTextListFormat.ListDecimal)
+        cursor.insertList(list_format)
+        self.desc_edit.setFocus()
+
+    def _insert_desc_task(self):
+        """Insert task checkbox in submit form description"""
+        cursor = self.desc_edit.textCursor()
+        cursor.insertText("[ ] ")
+        self.desc_edit.setFocus()
+
+    def eventFilter(self, obj, event):
+        """Handle keyboard shortcuts and mouse clicks for lists and task items in submit form"""
+        from PyQt5.QtCore import QEvent, Qt
+        from PyQt5.QtGui import QMouseEvent, QTextCursor, QKeyEvent
+
+        # Only handle events for desc_edit (submit form description field)
+        if not hasattr(self, 'desc_edit'):
+            return super().eventFilter(obj, event)
+
+        # Handle keyboard events for Tab/Shift+Tab in lists and Enter for checkboxes
+        if obj == self.desc_edit and event.type() == QEvent.KeyPress:
+            if isinstance(event, QKeyEvent):
+                cursor = self.desc_edit.textCursor()
+                current_list = cursor.currentList()
+
+                # Handle Tab - indent list item OR checkbox line
+                if event.key() == Qt.Key_Tab:
+                    if current_list:
+                        # List indenting
+                        cursor.beginEditBlock()
+                        list_format = current_list.format()
+                        list_format.setIndent(list_format.indent() + 1)
+                        current_list.setFormat(list_format)
+                        cursor.endEditBlock()
+                        return True
+                    else:
+                        # Checkbox line indenting
+                        cursor.select(QTextCursor.LineUnderCursor)
+                        line_text = cursor.selectedText()
+                        cursor.clearSelection()
+                        stripped = line_text.lstrip()
+                        if stripped.startswith('[ ] ') or stripped.startswith('[v] '):
+                            cursor = self.desc_edit.textCursor()
+                            cursor.movePosition(QTextCursor.StartOfBlock)
+                            cursor.insertText("  ")  # Add 2 spaces indent
+                            return True
+
+                # Handle Shift+Tab - outdent list item OR checkbox line
+                if event.key() == Qt.Key_Backtab:
+                    if current_list:
+                        # List outdenting
+                        cursor.beginEditBlock()
+                        list_format = current_list.format()
+                        if list_format.indent() > 0:
+                            list_format.setIndent(list_format.indent() - 1)
+                            current_list.setFormat(list_format)
+                        cursor.endEditBlock()
+                        return True
+                    else:
+                        # Checkbox line outdenting
+                        cursor.select(QTextCursor.LineUnderCursor)
+                        line_text = cursor.selectedText()
+                        cursor.clearSelection()
+                        if line_text.startswith('  '):
+                            stripped = line_text.lstrip()
+                            if stripped.startswith('[ ] ') or stripped.startswith('[v] '):
+                                cursor = self.desc_edit.textCursor()
+                                cursor.movePosition(QTextCursor.StartOfBlock)
+                                cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 2)
+                                if cursor.selectedText() == "  ":
+                                    cursor.removeSelectedText()
+                                return True
+
+                # Handle Enter for checkbox auto-continuation
+                if event.key() == Qt.Key_Return or event.key() == Qt.Key_Enter:
+                    cursor.select(QTextCursor.LineUnderCursor)
+                    line_text = cursor.selectedText()
+                    cursor.clearSelection()
+
+                    stripped = line_text.lstrip()
+                    if stripped.startswith('[ ] ') or stripped.startswith('[v] '):
+                        indent = line_text[:len(line_text) - len(stripped)]
+                        checkbox_content = stripped[4:].strip()
+
+                        if not checkbox_content:
+                            # Empty checkbox line - exit checkbox mode
+                            cursor = self.desc_edit.textCursor()
+                            cursor.insertText("\n")
+                            return True
+                        else:
+                            # Non-empty checkbox line - auto-create next checkbox
+                            cursor = self.desc_edit.textCursor()
+                            cursor.insertText("\n" + indent + "[ ] ")
+                            return True
+
+        # Handle mouse clicks on checkboxes in submit form description
+        if hasattr(self, 'desc_edit') and obj == self.desc_edit.viewport() and event.type() == QEvent.MouseButtonRelease:
+            if isinstance(event, QMouseEvent):
+                cursor = self.desc_edit.cursorForPosition(event.pos())
+                cursor.select(QTextCursor.LineUnderCursor)
+                line_text = cursor.selectedText()
+                cursor.clearSelection()
+
+                line_start_pos = cursor.block().position()
+                click_pos = self.desc_edit.cursorForPosition(event.pos()).position()
+                pos_in_line = click_pos - line_start_pos
+
+                # Check for checkbox patterns "[ ]" or "[v]" near click position
+                for i in range(max(0, pos_in_line - 3), min(len(line_text) - 2, pos_in_line + 3)):
+                    if i + 2 < len(line_text):
+                        pattern = line_text[i:i+3]
+                        if pattern == '[ ]' or pattern == '[v]':
+                            new_pattern = '[v]' if pattern == '[ ]' else '[ ]'
+                            cursor = self.desc_edit.textCursor()
+                            cursor.setPosition(line_start_pos + i)
+                            cursor.movePosition(QTextCursor.Right, QTextCursor.KeepAnchor, 3)
+                            cursor.insertText(new_pattern)
+                            return True
+
+        return super().eventFilter(obj, event)
+
     def _submit(self):
         """Submit a new issue"""
         try:
@@ -852,6 +2041,11 @@ class FastTrackGUI(QWidget):
         dlg = self.NoEscapeDialog(self)  # Use our custom dialog class
         dlg.setWindowTitle("Issue Status Viewer")
         layout = QVBoxLayout(dlg)
+
+        # Store description dialogs and their child windows to prevent garbage collection
+        description_dialogs = []
+        editor_dialogs = []
+        history_dialogs = []
 
         # Filter presets section
         presets_layout = QHBoxLayout()
@@ -1351,7 +2545,7 @@ class FastTrackGUI(QWidget):
             btn_modify.setEnabled(user in (ass, to))
 
         def on_cell_clicked(row, col):
-            # Title click shows description in popup window
+            # Title click shows description in popup window (non-modal, multiple allowed)
             if row <= 0 or col != 1:
                 return
             path = self._issue_paths[row-1]
@@ -1359,10 +2553,15 @@ class FastTrackGUI(QWidget):
             with open(path, 'r') as f:
                 data = yaml.safe_load(f)
 
+            # Create non-modal dialog
             dlg2 = QDialog(dlg)
             dlg2.setWindowTitle(f"Description - {data.get('id', '')}")
             dlg2.setMinimumWidth(700)
             dlg2.setMinimumHeight(400)
+
+            # Make it a normal window (not modal dialog)
+            dlg2.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinMaxButtonsHint)
+
             v = QVBoxLayout(dlg2)
 
             # Description text edit
@@ -1389,116 +2588,150 @@ class FastTrackGUI(QWidget):
             v.addLayout(btn_layout)
 
             def on_modify_description():
-                """Enable editing of description"""
-                te.setReadOnly(False)
-                te.setFocus()
-                btn_modify.setText("Save")
-                btn_modify.clicked.disconnect()
-                btn_modify.clicked.connect(on_save_description)
-                style_button(btn_modify, "success")
+                """Launch enhanced markdown editor for description (non-modal)"""
+                # Load HTML version if available, otherwise plain text
+                current_description_html = data.get('description_html', '')
+                current_description = current_description_html if current_description_html else data.get('description', '')
 
-            def on_save_description():
-                """Save modified description with history tracking"""
-                new_description = te.toPlainText().strip()
-                old_description = data.get('description', '')
+                # Create non-modal rich text editor
+                editor = MarkdownDescriptionEditor(current_description, dlg2)
+                editor.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinMaxButtonsHint)
+                editor.setWindowTitle(f"Edit Description - {data.get('id', '')}")
 
-                if new_description == old_description:
-                    QMessageBox.information(dlg2, "No Changes", "Description was not modified.")
-                    return
+                # Define save handler
+                def on_editor_save():
+                    # Get both HTML and plain text/markdown
+                    new_description_html = editor.get_description_html().strip()
+                    new_description_text = editor.get_description().strip()
 
-                if not new_description:
-                    QMessageBox.warning(dlg2, "Error", "Description cannot be empty.")
-                    return
+                    old_description = data.get('description', '')
+                    old_description_html = data.get('description_html', '')
 
-                # Add to change history
-                if 'description_history' not in data:
-                    data['description_history'] = []
+                    if new_description_text == old_description:
+                        QMessageBox.information(editor, "No Changes", "Description was not modified.")
+                        return
 
-                history_entry = {
-                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    'user': getpass.getuser(),
-                    'old_description': old_description
-                }
-                data['description_history'].append(history_entry)
+                    if not new_description_text:
+                        QMessageBox.warning(editor, "Error", "Description cannot be empty.")
+                        return
 
-                # Update description
-                data['description'] = new_description
+                    # Add to change history
+                    if 'description_history' not in data:
+                        data['description_history'] = []
 
-                # Save to file
-                try:
-                    with open(path, 'w') as f:
-                        yaml.safe_dump(data, f)
+                    history_entry = {
+                        'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        'user': getpass.getuser(),
+                        'old_description': old_description,
+                        'old_description_html': old_description_html
+                    }
+                    data['description_history'].append(history_entry)
 
-                    # Update the descriptions array
-                    self._descriptions[row-1] = new_description
+                    # Update description (both formats)
+                    data['description'] = new_description_text
+                    data['description_html'] = new_description_html
 
-                    # Update tooltip in table
-                    title_item = tbl.item(row, col)
-                    if title_item:
-                        title_item.setToolTip(new_description)
+                    # Save to file
+                    try:
+                        with open(path, 'w') as f:
+                            yaml.safe_dump(data, f)
 
-                    # Reload data for history
-                    with open(path, 'r') as f:
-                        data.clear()
-                        data.update(yaml.safe_load(f))
+                        # Update the descriptions array
+                        self._descriptions[row-1] = new_description_text
 
-                    # Reset modify button
-                    te.setReadOnly(True)
-                    btn_modify.setText("Modify")
-                    btn_modify.clicked.disconnect()
-                    btn_modify.clicked.connect(on_modify_description)
-                    style_button(btn_modify, "action")
+                        # Update tooltip in table
+                        title_item = tbl.item(row, col)
+                        if title_item:
+                            title_item.setToolTip(new_description_text)
 
-                    QMessageBox.information(dlg2, "Success", "Description updated successfully.")
+                        # Update displayed description
+                        te.setPlainText(new_description_text)
 
-                except Exception as e:
-                    QMessageBox.critical(dlg2, "Error", f"Failed to save description: {str(e)}")
+                        # Reload data for history
+                        with open(path, 'r') as f:
+                            data.clear()
+                            data.update(yaml.safe_load(f))
+
+                        QMessageBox.information(editor, "[OK] Success", "Description updated successfully!")
+                        editor.close()
+
+                    except Exception as e:
+                        QMessageBox.critical(editor, "[ERROR] Failed", f"Failed to save description:<br>{str(e)}")
+
+                # Override accepted signal to call our save handler
+                editor.accepted.connect(on_editor_save)
+
+                # Show as non-modal window
+                editor.show()
+
+                # Store reference to prevent garbage collection
+                editor_dialogs.append(editor)
+
+                # Cleanup when closed
+                def on_editor_closed():
+                    if editor in editor_dialogs:
+                        editor_dialogs.remove(editor)
+
+                editor.finished.connect(on_editor_closed)
 
             def on_show_history():
-                """Show change history in a separate dialog"""
-                history_dlg = QDialog(dlg2)
-                history_dlg.setWindowTitle(f"Change History - {data.get('id', '')}")
-                history_dlg.setMinimumWidth(700)
-                history_dlg.setMinimumHeight(400)
-                history_layout = QVBoxLayout(history_dlg)
+                """Show enhanced history dialog with visual diffs (non-modal)"""
+                # Create non-modal history dialog
+                history_dlg = DescriptionHistoryDialog(data, path, dlg2)
+                history_dlg.setWindowFlags(Qt.Window | Qt.WindowCloseButtonHint | Qt.WindowMinMaxButtonsHint)
+                history_dlg.setWindowTitle(f"Description History - {data.get('id', '')}")
 
-                # History table
-                history_text = QTextEdit()
-                history_text.setReadOnly(True)
+                # Define reload handler for when history is closed
+                def on_history_closed():
+                    # Reload data in case version was restored
+                    try:
+                        with open(path, 'r') as f:
+                            data.clear()
+                            data.update(yaml.safe_load(f))
 
-                # Load change history (reverse order - latest first)
-                change_history = data.get('description_history', [])
-                if change_history:
-                    history_content = ""
-                    # Reverse the list to show latest changes first
-                    for idx, entry in enumerate(reversed(change_history), 1):
-                        timestamp = entry.get('timestamp', '')
-                        user = entry.get('user', '')
-                        old_desc = entry.get('old_description', '')
-                        history_content += f"=== Change #{idx} (Latest) ===\n" if idx == 1 else f"=== Change #{idx} ===\n"
-                        history_content += f"Time: {timestamp}\n"
-                        history_content += f"Modified by: {user}\n"
-                        history_content += f"\nPrevious Content:\n{old_desc}\n"
-                        history_content += "=" * 70 + "\n\n"
-                    history_text.setPlainText(history_content)
-                else:
-                    history_text.setPlainText("No modification history available.")
+                        # Update displayed description if it changed
+                        te.setPlainText(data.get('description', ''))
 
-                history_layout.addWidget(history_text)
+                        # Update the descriptions array
+                        self._descriptions[row-1] = data.get('description', '')
 
-                # Close button
-                btn_close_history = QPushButton("Close")
-                style_button(btn_close_history, "gray")
-                btn_close_history.clicked.connect(history_dlg.close)
-                history_layout.addWidget(btn_close_history)
+                        # Update tooltip in table
+                        title_item = tbl.item(row, col)
+                        if title_item:
+                            title_item.setToolTip(data.get('description', ''))
 
-                history_dlg.exec_()
+                    except Exception as e:
+                        print(f"Error reloading data after history dialog: {e}")
+
+                    # Cleanup reference
+                    if history_dlg in history_dialogs:
+                        history_dialogs.remove(history_dlg)
+
+                # Connect close handler
+                history_dlg.finished.connect(on_history_closed)
+
+                # Show as non-modal window
+                history_dlg.show()
+
+                # Store reference to prevent garbage collection
+                history_dialogs.append(history_dlg)
 
             btn_modify.clicked.connect(on_modify_description)
             btn_history.clicked.connect(on_show_history)
             btn_close.clicked.connect(dlg2.close)
 
-            dlg2.exec_()
+            # Show as non-modal window (allows multiple descriptions open + interaction with issue viewer)
+            dlg2.show()
+
+            # Store reference to prevent garbage collection
+            description_dialogs.append(dlg2)
+
+            # Clean up reference when dialog is closed
+            def on_dialog_closed():
+                if dlg2 in description_dialogs:
+                    description_dialogs.remove(dlg2)
+
+            dlg2.finished.connect(on_dialog_closed)
 
         def on_modify():
             selected_rows = tbl.selectedItems()
