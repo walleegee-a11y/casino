@@ -119,6 +119,12 @@ class RichTextDescriptionEditor(QDialog):
         self.editor = QTextEdit()
         self.editor.setAcceptRichText(True)
 
+        # Set tab stop to 4 spaces (approximately 32 pixels)
+        from PyQt5.QtGui import QFontMetrics
+        font_metrics = QFontMetrics(self.editor.font())
+        tab_width = 4 * font_metrics.horizontalAdvance(' ')  # 4 spaces width
+        self.editor.setTabStopDistance(tab_width)
+
         # Load content - try HTML first, fall back to plain text
         if current_description.strip().startswith('<'):
             self.editor.setHtml(current_description)
