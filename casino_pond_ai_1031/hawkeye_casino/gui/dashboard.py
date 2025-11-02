@@ -3257,37 +3257,67 @@ if GUI_AVAILABLE:
             self._hide_data_by_condition(is_invalid_or_zero, "invalid/zero")
 
         def show_all_data(self):
-            """Show all hidden rows and columns (except user-hidden columns)"""
-            # Clear hide data tracking
-            self.hide_data_hidden_columns.clear()
-            self.hide_data_hidden_rows.clear()
+            """Show all hidden rows and columns (except user-hidden columns)
 
-            # Show all rows
-            for i in range(self.table.topLevelItemCount()):
-                item = self.table.topLevelItem(i)
-                item.setHidden(False)
-
-            # Show all columns except user-hidden ones
+            CRITICAL: This function restores visibility for rows/columns hidden by
+            "Hide Invalid Data" states, while PRESERVING rows/columns hidden by:
+            - Advanced Filters (dropdown filters, keyword filters, etc.)
+            - Keyword Group filters (Show Keyword Columns)
+            - User-hidden columns (context menu)
+            """
             headers = self.generate_dynamic_headers()
             path_column_count = Columns.PATH_COLUMN_COUNT
 
-            for col_index in range(path_column_count, len(headers)):
-                # Don't unhide columns that user explicitly hid via context menu
-                if col_index not in self.user_hidden_columns:
-                    # Don't unhide if path columns are toggled off
-                    if self.path_columns_hidden and col_index in [Columns.BASE_DIR, Columns.TOP_NAME, Columns.JOB]:
-                        continue
-                    self.table.setColumnHidden(col_index, False)
+            # Step 1: Unhide rows that were hidden ONLY by hide_data (not by filters)
+            for row_index in self.hide_data_hidden_rows:
+                if row_index < self.table.topLevelItemCount():
+                    item = self.table.topLevelItem(row_index)
+                    if item:
+                        item.setHidden(False)
 
-            # Re-apply filters after showing all data
-            self.reapply_filters_after_table_update()
+            # Step 2: Unhide columns that were hidden ONLY by hide_data (not by user)
+            for col_index in self.hide_data_hidden_columns:
+                if col_index < len(headers):
+                    # Don't unhide columns that user explicitly hid via context menu
+                    if col_index not in self.user_hidden_columns:
+                        # Don't unhide if path columns are toggled off
+                        if self.path_columns_hidden and col_index in [Columns.BASE_DIR, Columns.TOP_NAME, Columns.JOB]:
+                            continue
+                        self.table.setColumnHidden(col_index, False)
 
-            # Update count in status bar
+            # Step 3: Clear hide data tracking (we've restored visibility)
+            self.hide_data_hidden_columns.clear()
+            self.hide_data_hidden_rows.clear()
+
+            # Step 4: Re-apply keyword column visibility (Keyword Group filter + Show Keyword Columns)
+            # This ensures columns hidden by group/visibility filters remain hidden
+            keyword_visibility_text = self.keyword_visibility_input.text().strip()
+            if keyword_visibility_text or self.selected_keyword_groups:
+                # User has active keyword column filter or group filter - apply it
+                self.apply_keyword_column_visibility()
+            # If no keyword filters active, columns remain as unhidden above
+
+            # Step 5: Re-apply Advanced Filters to preserve user's filter choices
+            # Use the special version that respects hide_data state (even though it's now empty)
+            self._apply_filters_preserve_hide_data()
+
+            # Step 6: Update status bar
             visible_rows = sum(1 for i in range(self.table.topLevelItemCount())
                               if not self.table.topLevelItem(i).isHidden())
             total_rows = self.table.topLevelItemCount()
+            active_filters = self.get_active_filters_text()
 
-            self.status_bar.showMessage(f"Showing all data: {visible_rows}/{total_rows} rows visible.")
+            # Count visible keyword columns
+            visible_keyword_cols = sum(1 for col in range(path_column_count, len(headers))
+                                      if not self.table.isColumnHidden(col))
+
+            if active_filters != "None":
+                self.status_bar.showMessage(
+                    f"Showing all data: {visible_rows}/{total_rows} rows, "
+                    f"{visible_keyword_cols} keyword columns | Active filters: {active_filters}")
+            else:
+                self.status_bar.showMessage(
+                    f"Showing all data: {visible_rows}/{total_rows} rows, {visible_keyword_cols} keyword columns visible.")
 
         def _hide_data_by_condition(self, condition_func, description: str):
             """Generic function to hide columns/rows based on condition
@@ -3317,6 +3347,14 @@ if GUI_AVAILABLE:
             self.hide_data_hidden_columns.clear()
             self.hide_data_hidden_rows.clear()
 
+            # CRITICAL: Re-apply keyword column visibility BEFORE analyzing columns
+            # This ensures we only analyze columns that should be visible based on
+            # Keyword Group filter and Show Keyword Columns filter
+            keyword_visibility_text = self.keyword_visibility_input.text().strip()
+            if keyword_visibility_text or self.selected_keyword_groups:
+                # User has active keyword column filter or group filter - apply it
+                self.apply_keyword_column_visibility()
+
             # Get rows that are visible AFTER unhiding (respecting only user filters)
             # These are rows passing Advanced Filters, not hide_data hiding
             all_items = [self.table.topLevelItem(i)
@@ -3332,7 +3370,12 @@ if GUI_AVAILABLE:
             rows_to_hide = []
 
             # Check columns against condition
+            # CRITICAL: Only check columns that are CURRENTLY VISIBLE (not hidden by group/keyword filters)
             for col_index in range(path_column_count, len(headers)):
+                # Skip columns already hidden by keyword group/visibility filters
+                if self.table.isColumnHidden(col_index):
+                    continue
+
                 if all(condition_func(item.text(col_index)) for item in all_items):
                     columns_to_hide.append((col_index, headers[col_index]))
 
