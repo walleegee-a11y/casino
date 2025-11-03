@@ -72,7 +72,7 @@ except ImportError:
 # ============================================================================
 # Set DEBUG_MODE = True to enable debug output for troubleshooting
 # Set DEBUG_MODE = False for production use (default)
-DEBUG_MODE = False
+DEBUG_MODE = True  # **ENABLED for debugging filtering issue**
 
 def debug_print(message: str, category: str = ""):
     """Print debug message if DEBUG_MODE is enabled
@@ -261,6 +261,10 @@ if GUI_AVAILABLE:
             self.hide_data_state = 0  # 0=show all, 1=hide invalid, 2=hide invalid+zero
             self.hide_data_hidden_columns = set()  # Columns hidden by hide invalid/zero
             self.hide_data_hidden_rows = set()     # Row indices hidden by hide invalid/zero
+
+            # View mode (task/job/both)
+            self.view_mode = "Task View"  # Default to Task View
+            self.current_selected_analysis = None  # Track current selection for view mode switching
 
             # Keyword grouping (from YAML configuration)
             self.yaml_config = None  # Store YAML configuration
@@ -459,6 +463,15 @@ if GUI_AVAILABLE:
                     # Group keywords using YAML configuration
                     self.keyword_groups = group_keywords_by_yaml(self.all_keywords, self.yaml_config)
                     debug_print(f"Keywords grouped into {len(self.keyword_groups)} groups", "UI")
+
+                    # **NEW: Add special group for job aggregates**
+                    # This allows filtering to show only aggregate rows
+                    if 'jobs' in self.yaml_config:
+                        job_names = list(self.yaml_config['jobs'].keys())
+                        # Note: We can't add keywords here since aggregates are virtual
+                        # But we can add this info for documentation
+                        self.keyword_groups['[Job Aggregates]'] = []
+                        debug_print(f"Added job aggregates group for {len(job_names)} jobs", "UI")
 
                     # Update the keyword group dropdown
                     self.update_keyword_group_dropdown()
@@ -907,6 +920,27 @@ if GUI_AVAILABLE:
             """)
             self.show_hidden_columns_btn.setEnabled(False)
             button_layout.addWidget(self.show_hidden_columns_btn)
+
+            # View Mode selector
+            button_layout.addWidget(QLabel("View Mode:"))
+            self.view_mode_combo = QComboBox()
+            self.view_mode_combo.addItems(["Task View", "Job View", "Both"])
+            self.view_mode_combo.setCurrentText("Task View")
+            self.view_mode_combo.currentTextChanged.connect(self.switch_view_mode)
+            self.view_mode_combo.setToolTip(
+                "Task View: Show individual tasks (default)\n"
+                "Job View: Show aggregated job summaries\n"
+                "Both: Show tasks AND job aggregates"
+            )
+            self.view_mode_combo.setStyleSheet(f"""
+                QComboBox {{
+                    padding: 4px 8px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    min-width: 100px;
+                }}
+            """)
+            button_layout.addWidget(self.view_mode_combo)
 
             # ADD THIS: Keyword Column Width button
             self.keyword_width_btn = QPushButton("Keyword Width: 80px")
@@ -1610,11 +1644,22 @@ if GUI_AVAILABLE:
             return {key: sorted(list(value)) for key, value in components.items()}
 
         def clean_path(self, path: str) -> str:
-            """Clean path by removing ./ patterns"""
-            cleaned = path.replace('/./', '/')
+            """Clean path by removing ./ patterns and normalizing separators"""
+            # **CRITICAL: Normalize backslashes to forward slashes for consistent dict keys on Windows**
+            cleaned = path.replace('\\', '/')
+            cleaned = cleaned.replace('/./', '/')
             if cleaned.startswith('./'):
                 cleaned = cleaned[2:]
             return cleaned
+
+        def normalize_path_key(self, path: str) -> str:
+            """Normalize path for use as dictionary key (forward slashes, no trailing slash)"""
+            # Convert backslashes to forward slashes for consistent dict key lookup on Windows
+            normalized = path.replace('\\', '/')
+            # Remove trailing slash
+            if normalized.endswith('/') and len(normalized) > 1:
+                normalized = normalized[:-1]
+            return normalized
 
         def update_path_components_from_runs(self, runs: List[Dict[str, Any]]):
             """Update path components from discovered runs for filtering"""
@@ -2768,7 +2813,14 @@ if GUI_AVAILABLE:
                 return
 
             # Update runs data
-            self.runs_data.update(analysis_results)
+            # **CRITICAL: Normalize paths before storing in self.runs_data for consistent dict keys**
+            normalized_results = {}
+            for run_path, run_data in analysis_results.items():
+                normalized_path = self.normalize_path_key(run_path)
+                normalized_results[normalized_path] = run_data
+                debug_print(f"Normalizing stored path: {run_path} -> {normalized_path}", "STORAGE")
+
+            self.runs_data.update(normalized_results)
 
             # **ADD THIS: Regenerate headers after analysis to include new dynamic keywords**
             self.all_keywords = self.collect_all_keywords()
@@ -2778,17 +2830,35 @@ if GUI_AVAILABLE:
             # Load YAML config and group keywords for filtering
             self.load_yaml_config_and_group_keywords()
 
-            # Reconstruct selected analysis structure
+            # Reconstruct selected analysis structure (needed for completion message)
+            # **CRITICAL: Normalize paths for consistent dictionary key lookup**
             selected_analysis = {}
+            debug_print(f"=== ANALYSIS COMPLETE ===", "ANALYSIS")
+            debug_print(f"Runs in analysis_results: {list(analysis_results.keys())}", "ANALYSIS")
+
             for run_path, run_data in analysis_results.items():
+                # **Normalize path for dict key consistency on Windows**
+                normalized_path = self.normalize_path_key(run_path)
+                debug_print(f"Normalized path: {run_path} -> {normalized_path}", "ANALYSIS")
+
                 if 'jobs' in run_data:
-                    selected_analysis[run_path] = {}
+                    selected_analysis[normalized_path] = {}
                     for job_name, job_data in run_data['jobs'].items():
                         if 'tasks' in job_data:
-                            selected_analysis[run_path][job_name] = set(job_data['tasks'].keys())
+                            selected_analysis[normalized_path][job_name] = set(job_data['tasks'].keys())
+                            debug_print(f"  Job {job_name}: {len(job_data['tasks'])} tasks", "ANALYSIS")
 
-            # Update table with results
-            self.update_selected_runs_in_table(selected_analysis)
+            debug_print(f"Runs in selected_analysis: {list(selected_analysis.keys())}", "ANALYSIS")
+            debug_print(f"Total runs in self.runs_data after update: {len(self.runs_data)}", "ANALYSIS")
+            debug_print(f"Runs in self.runs_data: {list(self.runs_data.keys())}", "ANALYSIS")
+            debug_print(f"=========================", "ANALYSIS")
+
+            # **Store current selection for view mode switching**
+            self.current_selected_analysis = selected_analysis
+
+            # **NEW: Always rebuild table to avoid showing old data**
+            # This clears old runs and shows only newly analyzed runs
+            self.rebuild_table_with_view_mode(selected_analysis)
 
             # Show completion message
             total_tasks = sum(sum(len(tasks) for tasks in jobs.values())
@@ -2986,6 +3056,16 @@ if GUI_AVAILABLE:
                 self._refreshing = True
                 self.initializing = True
 
+                # **Clear selection context on refresh**
+                self.current_selected_analysis = None
+
+                # **CRITICAL: Clear all previously analyzed data on refresh**
+                # This ensures only newly selected runs are displayed after refresh
+                debug_print("=== REFRESH: Clearing all analyzed data ===", "REFRESH")
+                debug_print(f"Clearing {len(self.runs_data)} previously analyzed runs", "REFRESH")
+                self.runs_data.clear()
+                debug_print("runs_data cleared - starting fresh", "REFRESH")
+
                 # Save filter state
                 current_filters = {
                     'status': self.status_combo.currentText(),
@@ -3108,6 +3188,415 @@ if GUI_AVAILABLE:
                         border-left: 2px solid {Colors.BORDER_GRAY};
                     }}
                 """)
+
+        def switch_view_mode(self, mode: str):
+            """Switch between Task View, Job View, or Both
+
+            Args:
+                mode: "Task View", "Job View", or "Both"
+            """
+            debug_print(f"Switching to view mode: {mode}", "UI")
+            self.view_mode = mode
+
+            # Re-populate table with current view mode
+            if self.table.topLevelItemCount() > 0:
+                # Check if we have analyzed data
+                has_analyzed_data = any(
+                    self.table.topLevelItem(i).text(Columns.STATUS) in [StatusValues.COMPLETED, StatusValues.FAILED]
+                    for i in range(self.table.topLevelItemCount())
+                )
+
+                if has_analyzed_data:
+                    # Rebuild table with aggregated view, respecting current selection
+                    self.rebuild_table_with_view_mode(self.current_selected_analysis)
+                else:
+                    # Just status check data - can't aggregate without analysis
+                    self.status_bar.showMessage(
+                        f"View mode: {mode}. Note: Job aggregation requires analyzed data. "
+                        f"Use 'Gather Selected' first."
+                    )
+
+        def rebuild_table_with_view_mode(self, selected_analysis=None):
+            """Rebuild table to show current view mode (Task/Job/Both)
+
+            Args:
+                selected_analysis: Optional dict of {run_path: {job_name: {task_names}}}
+                                  If provided, only show these runs. If None, show all analyzed runs.
+            """
+            debug_print(f"Rebuilding table with view mode: {self.view_mode}", "TABLE")
+
+            # Save current state
+            current_scroll_h = self.table.horizontalScrollBar().value()
+            current_scroll_v = self.table.verticalScrollBar().value()
+
+            # Clear and rebuild
+            self.table.clear()
+            self.clear_user_hidden_columns()
+
+            headers = self.generate_dynamic_headers()
+            self.table.setHeaderLabels(headers)
+
+            if self.view_mode == "Task View":
+                # Show individual tasks (original behavior)
+                self.populate_table_with_tasks(headers, selected_analysis)
+            elif self.view_mode == "Job View":
+                # Show only job aggregates
+                self.populate_table_with_job_aggregates(headers, selected_analysis)
+            elif self.view_mode == "Both":
+                # Show tasks AND job aggregates
+                self.populate_table_with_tasks(headers, selected_analysis)
+                self.populate_table_with_job_aggregates(headers, selected_analysis)
+
+            # Restore scroll position
+            self.table.horizontalScrollBar().setValue(current_scroll_h)
+            self.table.verticalScrollBar().setValue(current_scroll_v)
+
+            # Re-apply filters
+            self.reapply_filters_after_table_update()
+
+            # Update column widths
+            self.set_keyword_column_widths(min_width=80, fixed_width=False)
+
+            self.status_bar.showMessage(f"Table updated with {self.view_mode}")
+
+        def populate_table_with_tasks(self, headers: List[str], selected_analysis=None):
+            """Populate table with individual task rows
+
+            Args:
+                headers: List of column headers
+                selected_analysis: Optional dict to filter by {run_path: {job_name: {task_names}}}
+            """
+            debug_print("Populating table with task view", "TABLE")
+            debug_print(f"Total runs in self.runs_data: {len(self.runs_data)}", "TABLE")
+            debug_print(f"Selected runs in selected_analysis: {len(selected_analysis) if selected_analysis else 'None (show all)'}", "TABLE")
+
+            if selected_analysis:
+                debug_print(f"Selected run paths: {list(selected_analysis.keys())}", "TABLE")
+
+            added_runs = []
+            skipped_runs = []
+            added_tasks_count = 0
+
+            for run_path, run_data in self.runs_data.items():
+                # **FILTER: Only include runs in selected_analysis**
+                # **CRITICAL: Normalize path for consistent dict key lookup on Windows**
+                normalized_path = self.normalize_path_key(run_path)
+
+                if selected_analysis is not None and normalized_path not in selected_analysis:
+                    skipped_runs.append(run_path)
+                    debug_print(f"SKIPPING run (not in selection): {run_path} (normalized: {normalized_path})", "TABLE")
+                    continue
+
+                added_runs.append(run_path)
+                debug_print(f"ADDING run: {run_path} (normalized: {normalized_path})", "TABLE")
+
+                # Extract path components
+                clean_path = self.clean_path(run_path)
+                path_parts = Path(clean_path).parts
+
+                if len(path_parts) >= 7:
+                    base_dir = path_parts[-7]
+                    top_name = path_parts[-6]
+                    user = path_parts[-5].replace('works_', '')
+                    block = path_parts[-4]
+                    dk_ver_tag = path_parts[-3]
+                    run_version = path_parts[-1]
+                else:
+                    base_dir = top_name = user = block = dk_ver_tag = run_version = "unknown"
+
+                # Handle both new (jobs) and old (tasks) structures
+                if 'jobs' in run_data:
+                    for job_name, job_data in run_data['jobs'].items():
+                        # **FILTER: Only include jobs in selected_analysis**
+                        # **Use normalized_path for dict lookup**
+                        if selected_analysis is not None:
+                            if job_name not in selected_analysis[normalized_path]:
+                                continue
+
+                        for task_name, task_data in job_data.get('tasks', {}).items():
+                            # **FILTER: Only include tasks in selected_analysis**
+                            # **Use normalized_path for dict lookup**
+                            if selected_analysis is not None:
+                                if task_name not in selected_analysis[normalized_path][job_name]:
+                                    debug_print(f"  SKIPPING task {job_name}/{task_name} (not in selection)", "TABLE")
+                                    continue
+
+                            debug_print(f"  ADDING task {job_name}/{task_name}", "TABLE")
+                            added_tasks_count += 1
+                            self.add_task_row(
+                                headers, base_dir, top_name, user, block, dk_ver_tag,
+                                run_version, run_path, job_name, task_name, task_data
+                            )
+                elif 'tasks' in run_data:
+                    for task_name, task_data in run_data['tasks'].items():
+                        job_name = task_data.get('job', 'unknown')
+
+                        # **FILTER: Only include if in selected_analysis**
+                        # **Use normalized_path for dict lookup**
+                        if selected_analysis is not None:
+                            if job_name not in selected_analysis.get(normalized_path, {}):
+                                debug_print(f"  SKIPPING task {job_name}/{task_name} (job not in selection)", "TABLE")
+                                continue
+                            if task_name not in selected_analysis[normalized_path][job_name]:
+                                debug_print(f"  SKIPPING task {job_name}/{task_name} (task not in selection)", "TABLE")
+                                continue
+
+                        debug_print(f"  ADDING task {job_name}/{task_name}", "TABLE")
+                        added_tasks_count += 1
+                        self.add_task_row(
+                            headers, base_dir, top_name, user, block, dk_ver_tag,
+                            run_version, run_path, job_name, task_name, task_data
+                        )
+
+            # **DEBUG SUMMARY**
+            debug_print(f"=== POPULATE SUMMARY ===", "TABLE")
+            debug_print(f"Total runs processed: {len(added_runs) + len(skipped_runs)}", "TABLE")
+            debug_print(f"Runs added: {len(added_runs)}", "TABLE")
+            debug_print(f"Runs skipped: {len(skipped_runs)}", "TABLE")
+            debug_print(f"Tasks added to table: {added_tasks_count}", "TABLE")
+            debug_print(f"========================", "TABLE")
+
+        def populate_table_with_job_aggregates(self, headers: List[str], selected_analysis=None):
+            """Populate table with aggregated job rows
+
+            Args:
+                headers: List of column headers
+                selected_analysis: Optional dict to filter by {run_path: {job_name: {task_names}}}
+            """
+            debug_print("Populating table with job aggregates", "TABLE")
+
+            for run_path, run_data in self.runs_data.items():
+                # **FILTER: Only include runs in selected_analysis**
+                # **CRITICAL: Normalize path for consistent dict key lookup on Windows**
+                normalized_path = self.normalize_path_key(run_path)
+
+                if selected_analysis is not None and normalized_path not in selected_analysis:
+                    continue
+
+                # Extract path components
+                clean_path = self.clean_path(run_path)
+                path_parts = Path(clean_path).parts
+
+                if len(path_parts) >= 7:
+                    base_dir = path_parts[-7]
+                    top_name = path_parts[-6]
+                    user = path_parts[-5].replace('works_', '')
+                    block = path_parts[-4]
+                    dk_ver_tag = path_parts[-3]
+                    run_version = path_parts[-1]
+                else:
+                    base_dir = top_name = user = block = dk_ver_tag = run_version = "unknown"
+
+                # Handle both new (jobs) and old (tasks) structures
+                if 'jobs' in run_data:
+                    for job_name, job_data in run_data['jobs'].items():
+                        # **FILTER: Only include jobs in selected_analysis**
+                        # **Use normalized_path for dict lookup**
+                        if selected_analysis is not None:
+                            if job_name not in selected_analysis[normalized_path]:
+                                continue
+
+                        tasks = job_data.get('tasks', {})
+
+                        # **FILTER: Only aggregate selected tasks**
+                        # **Use normalized_path for dict lookup**
+                        if selected_analysis is not None:
+                            selected_tasks = selected_analysis[normalized_path][job_name]
+                            tasks = {name: data for name, data in tasks.items() if name in selected_tasks}
+
+                        if tasks:
+                            # Aggregate all tasks in this job
+                            aggregate_data = self.aggregate_tasks_to_job(tasks)
+                            self.add_aggregate_row(
+                                headers, base_dir, top_name, user, block, dk_ver_tag,
+                                run_version, run_path, job_name, aggregate_data, len(tasks)
+                            )
+
+        def aggregate_tasks_to_job(self, tasks: Dict[str, Any]) -> Dict[str, Any]:
+            """Aggregate multiple tasks into a single job-level summary
+
+            Args:
+                tasks: Dictionary of task_name -> task_data
+
+            Returns:
+                Aggregated data dictionary
+            """
+            debug_print(f"Aggregating {len(tasks)} tasks", "TABLE")
+
+            # Aggregate status: PASS if all completed, FAIL if any failed
+            statuses = [t.get('simplified_status', StatusValues.COMPLETED) for t in tasks.values()]
+            if all(s == StatusValues.COMPLETED for s in statuses):
+                aggregate_status = StatusValues.COMPLETED
+            elif any(s == StatusValues.FAILED for s in statuses):
+                aggregate_status = StatusValues.FAILED
+            else:
+                aggregate_status = "MIXED"
+
+            # Aggregate keywords
+            aggregate_keywords = {}
+            for task_name, task_data in tasks.items():
+                for kw_name, kw_data in task_data.get('keywords', {}).items():
+                    if kw_name not in aggregate_keywords:
+                        # First occurrence - initialize
+                        aggregate_keywords[kw_name] = {
+                            'values': [],
+                            'unit': kw_data.get('unit', ''),
+                            'type': kw_data.get('type', '')
+                        }
+
+                    # Collect value
+                    value = kw_data.get('value')
+                    if value is not None:
+                        aggregate_keywords[kw_name]['values'].append(value)
+
+            # Compute aggregate values for each keyword
+            final_keywords = {}
+            for kw_name, kw_info in aggregate_keywords.items():
+                values = kw_info['values']
+                if not values:
+                    continue
+
+                # Determine aggregation strategy based on keyword type
+                if all(isinstance(v, (int, float)) for v in values):
+                    # Numeric values - choose aggregation strategy
+                    if 'error' in kw_name.lower() or 'warning' in kw_name.lower() or '_num' in kw_name.lower() or 'count' in kw_name.lower():
+                        # Sum for counts and violations
+                        aggregate_value = sum(values)
+                    elif 'wns' in kw_name.lower():
+                        # WNS (Worst Negative Slack): take MIN (most negative = worst)
+                        aggregate_value = min(values)
+                    elif 'tns' in kw_name.lower():
+                        # TNS (Total Negative Slack): SUM all slack violations
+                        aggregate_value = sum(values)
+                    elif 'nov' in kw_name.lower():
+                        # NOV (Number of Violations): SUM
+                        aggregate_value = sum(values)
+                    elif 'cpu_time' in kw_name.lower() or 'real_time' in kw_name.lower() or 'runtime' in kw_name.lower():
+                        # Runtime: SUM
+                        aggregate_value = sum(values)
+                    elif 'area' in kw_name.lower() or 'utilization' in kw_name.lower() or 'density' in kw_name.lower():
+                        # Area/utilization: use LAST value (final stage)
+                        aggregate_value = values[-1]
+                    elif 'overflow' in kw_name.lower() or 'hotspot' in kw_name.lower():
+                        # Congestion: take MAX (worst)
+                        aggregate_value = max(values)
+                    else:
+                        # Default: AVERAGE for other metrics
+                        aggregate_value = sum(values) / len(values)
+
+                    final_keywords[kw_name] = {
+                        'value': aggregate_value,
+                        'unit': kw_info['unit'],
+                        'type': kw_info['type']
+                    }
+                elif all(isinstance(v, str) for v in values):
+                    # String values - concatenate or pick representative
+                    if len(set(values)) == 1:
+                        # All same - use that value
+                        final_keywords[kw_name] = {
+                            'value': values[0],
+                            'unit': kw_info['unit'],
+                            'type': kw_info['type']
+                        }
+                    else:
+                        # Different values - show "MIXED"
+                        final_keywords[kw_name] = {
+                            'value': "MIXED",
+                            'unit': kw_info['unit'],
+                            'type': kw_info['type']
+                        }
+
+            return {
+                'simplified_status': aggregate_status,
+                'keywords': final_keywords,
+                'task_count': len(tasks)
+            }
+
+        def add_task_row(self, headers, base_dir, top_name, user, block, dk_ver_tag,
+                        run_version, run_path, job_name, task_name, task_data):
+            """Add a single task row to the table"""
+            row_data = [""] * len(headers)
+            row_data[Columns.BASE_DIR] = base_dir
+            row_data[Columns.TOP_NAME] = top_name
+            row_data[Columns.USER] = user
+            row_data[Columns.BLOCK] = block
+            row_data[Columns.DK_VER_TAG] = dk_ver_tag
+            row_data[Columns.RUN_VERSION] = run_version
+            row_data[Columns.JOB] = job_name
+            row_data[Columns.TASK] = task_name
+            row_data[Columns.STATUS] = task_data.get('simplified_status', StatusValues.COMPLETED)
+
+            # Fill keyword columns
+            for i, header in enumerate(headers[Columns.PATH_COLUMN_COUNT:], Columns.PATH_COLUMN_COUNT):
+                keyword_name = header.replace('-', '_')
+                value = self.get_keyword_value(task_data, keyword_name, "-")
+                row_data[i] = value
+
+            item = QTreeWidgetItem(self.table, row_data)
+            item.setData(0, Qt.UserRole, run_path)
+            item.setData(0, Qt.UserRole + 1, job_name)
+            item.setData(0, Qt.UserRole + 2, task_name)
+
+            # Color status column
+            color = self.get_status_color(task_data.get('simplified_status', StatusValues.COMPLETED))
+            item.setForeground(Columns.STATUS, color)
+            font = item.font(Columns.STATUS)
+            font.setBold(True)
+            item.setFont(Columns.STATUS, font)
+
+        def add_aggregate_row(self, headers, base_dir, top_name, user, block, dk_ver_tag,
+                             run_version, run_path, job_name, aggregate_data, task_count):
+            """Add an aggregated job row to the table"""
+            row_data = [""] * len(headers)
+            row_data[Columns.BASE_DIR] = base_dir
+            row_data[Columns.TOP_NAME] = top_name
+            row_data[Columns.USER] = user
+            row_data[Columns.BLOCK] = block
+            row_data[Columns.DK_VER_TAG] = dk_ver_tag
+            row_data[Columns.RUN_VERSION] = run_version
+            row_data[Columns.JOB] = job_name
+            row_data[Columns.TASK] = f"{job_name}_all ({task_count} tasks)"  # Mark as aggregate
+            row_data[Columns.STATUS] = aggregate_data.get('simplified_status', StatusValues.COMPLETED)
+
+            # Fill keyword columns with aggregated values
+            for i, header in enumerate(headers[Columns.PATH_COLUMN_COUNT:], Columns.PATH_COLUMN_COUNT):
+                keyword_name = header.replace('-', '_')
+                keywords = aggregate_data.get('keywords', {})
+
+                if keyword_name in keywords:
+                    kw_data = keywords[keyword_name]
+                    value = kw_data.get('value')
+                    if value is not None:
+                        if isinstance(value, float):
+                            if value == int(value):
+                                row_data[i] = str(int(value))
+                            else:
+                                row_data[i] = f"{value:.4f}".rstrip('0').rstrip('.')
+                        else:
+                            row_data[i] = str(value)
+                    else:
+                        row_data[i] = "-"
+                else:
+                    row_data[i] = "-"
+
+            item = QTreeWidgetItem(self.table, row_data)
+            item.setData(0, Qt.UserRole, run_path)
+            item.setData(0, Qt.UserRole + 1, job_name)
+            item.setData(0, Qt.UserRole + 2, f"{job_name}_all")  # Mark as aggregate
+
+            # Color status column
+            color = self.get_status_color(aggregate_data.get('simplified_status', StatusValues.COMPLETED))
+            item.setForeground(Columns.STATUS, color)
+
+            # Make aggregate rows bold and slightly different color
+            for col in range(len(headers)):
+                font = item.font(col)
+                font.setBold(True)
+                item.setFont(col, font)
+
+            # Light blue background for aggregate rows
+            for col in range(len(headers)):
+                item.setBackground(col, QColor(240, 248, 255))
 
         def toggle_path_columns(self):
             """Toggle visibility of path columns"""
