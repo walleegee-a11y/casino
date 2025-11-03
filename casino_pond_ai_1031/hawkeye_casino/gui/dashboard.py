@@ -770,29 +770,19 @@ if GUI_AVAILABLE:
                 chart_table_btn.setToolTip("Create charts and tables from selected data")
                 button_layout.addWidget(chart_table_btn)
 
-            # Export CSV button
-            export_csv_btn = QPushButton("Export CSV")
-            export_csv_btn.clicked.connect(self.export_table_to_csv)
-            export_csv_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {Colors.WARNING_ORANGE};
-                    color: black;
-                    padding: 6px 12px;
-                    border: 1px solid {Colors.BORDER_GRAY};
-                    font-size: 11px;
-                    font-weight: normal;
-                }}
-                QPushButton:hover {{
-                    background-color: #D39600;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-                }}
-            """)
-            button_layout.addWidget(export_csv_btn)
+            # Export button with dropdown menu (merged CSV and HTML)
+            export_btn = QPushButton("Export")
+            export_menu = QMenu(export_btn)
 
-            # Export HTML button
-            export_html_btn = QPushButton("Export HTML")
-            export_html_btn.clicked.connect(self.export_table_to_html)
-            export_html_btn.setStyleSheet(f"""
+            # Add export options to menu
+            export_csv_action = export_menu.addAction("Export CSV")
+            export_csv_action.triggered.connect(self.export_table_to_csv)
+
+            export_html_action = export_menu.addAction("Export HTML")
+            export_html_action.triggered.connect(self.export_table_to_html)
+
+            export_btn.setMenu(export_menu)
+            export_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {Colors.WARNING_ORANGE};
                     color: black;
@@ -805,8 +795,11 @@ if GUI_AVAILABLE:
                     background-color: #D39600;
                     box-shadow: 0 2px 4px rgba(0,0,0,0.15);
                 }}
+                QPushButton::menu-indicator {{
+                    width: 0px;  /* Hide default arrow since we have ▼ in text */
+                }}
             """)
-            button_layout.addWidget(export_html_btn)
+            button_layout.addWidget(export_btn)
 
             # Archive Analysis button
             archive_btn = QPushButton("Archive Analysis")
@@ -901,25 +894,7 @@ if GUI_AVAILABLE:
             """)
             button_layout.addWidget(self.toggle_path_btn)
 
-            # Show Hidden Columns button
-            self.show_hidden_columns_btn = QPushButton("Show Hidden Columns")
-            self.show_hidden_columns_btn.clicked.connect(self.show_hidden_columns)
-            self.show_hidden_columns_btn.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: {Colors.INFO_CYAN};
-                    color: black;
-                    padding: 6px 12px;
-                    border: 1px solid {Colors.BORDER_GRAY};
-                    font-size: 11px;
-                    font-weight: normal;
-                }}
-                QPushButton:hover {{
-                    background-color: #009ED5;
-                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-                }}
-            """)
-            self.show_hidden_columns_btn.setEnabled(False)
-            button_layout.addWidget(self.show_hidden_columns_btn)
+            # NOTE: "Show Hidden Columns" functionality moved to column header right-click context menu
 
             # View Mode selector
             button_layout.addWidget(QLabel("View Mode:"))
@@ -3930,16 +3905,13 @@ if GUI_AVAILABLE:
             self.update_show_hidden_columns_button_state()
 
         def update_show_hidden_columns_button_state(self):
-            """Update Show Hidden Columns button state and text with count"""
-            if hasattr(self, 'show_hidden_columns_btn'):
-                hidden_count = len(self.user_hidden_columns)
+            """Update Show Hidden Columns button state and text with count
 
-                if hidden_count > 0:
-                    self.show_hidden_columns_btn.setEnabled(True)
-                    self.show_hidden_columns_btn.setText(f"Show Hidden Columns ({hidden_count} ea)")
-                else:
-                    self.show_hidden_columns_btn.setEnabled(False)
-                    self.show_hidden_columns_btn.setText("Show Hidden Columns")
+            NOTE: This function is now a no-op since the button was removed.
+            The functionality is now available in the column header right-click context menu.
+            Keeping this function to avoid breaking existing calls.
+            """
+            pass  # Button removed, functionality moved to context menu
 
         def clear_user_hidden_columns(self):
             """Clear user hidden columns tracking"""
@@ -4579,6 +4551,12 @@ if GUI_AVAILABLE:
             else:
                 hide_action = context_menu.addAction("Hide Column")
                 hide_action.triggered.connect(lambda: self.toggle_column_visibility(column_index, False))
+
+            # Add "Show Hidden Columns" option if there are any hidden columns
+            if len(self.user_hidden_columns) > 0:
+                context_menu.addSeparator()
+                show_all_hidden_action = context_menu.addAction(f"Show Hidden Columns ({len(self.user_hidden_columns)} ea)")
+                show_all_hidden_action.triggered.connect(self.show_hidden_columns)
 
             # ========== ADD THIS SECTION ==========
             # Add separator and statistics option for keyword columns

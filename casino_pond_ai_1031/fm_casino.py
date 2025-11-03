@@ -1057,20 +1057,25 @@ exit $exit_code
     return start_time_str, end_time_str, runtime, status
 
 def monitor_with_process_tree_csh(process, status_file, pid_file, task_name, max_wait_time=86400):
-    """Monitor both status file and csh process health - LESS AGGRESSIVE VERSION"""
+    """Monitor both status file and csh process health with FAST terminal death detection"""
     global interrupted
     wait_start = time.time()
     last_status = None
     last_process_check = time.time()
+    last_terminal_check = time.time()
+    terminal_closed_warned = False  # Track if we've already warned about terminal closure
 
-    # CRITICAL FIX: Increase check interval to reduce false positives
-    process_check_interval = 300  # Check every 5 minutes instead of 30 seconds
+    # BALANCED: Check process health every 5 minutes for stale status detection
+    process_check_interval = 300  # 5 minutes for deep process checks
 
-    # CRITICAL FIX: Add grace period before declaring process dead
+    # Terminal death detection: Check every 10 seconds (MUCH faster)
+    terminal_check_interval = 10  # 10 seconds for terminal process checks
+
+    # Grace period for stale status file (only for deep process checks)
     status_file_grace_period = 600  # 10 minutes without status update
     last_status_update = time.time()
 
-    print(f"Monitoring task completion for {task_name} - checking status file + process health...")
+    print(f"Monitoring task completion for {task_name} - checking status file + terminal + process health...")
 
     while not interrupted:
         current_time = time.time()
@@ -1105,8 +1110,29 @@ def monitor_with_process_tree_csh(process, status_file, pid_file, task_name, max
             except Exception as e:
                 print(f"Warning: Could not read status file {status_file}: {e}")
 
-        # SECONDARY: Check process health periodically (much less frequent)
-        # CRITICAL FIX: Only check if status file hasn't been updated in grace period
+        # NEW: FAST terminal process death detection (every 10 seconds)
+        # This catches accidental "X" clicks on terminal window QUICKLY
+        if current_time - last_terminal_check > terminal_check_interval:
+            if detect_terminal_closed_fast(process, task_name):
+                # Double-check: Is the actual task process still running?
+                if not check_task_process_alive(pid_file, task_name):
+                    # Task is dead - print final message and exit
+                    if not terminal_closed_warned:
+                        print(f"WARNING: Terminal window for {task_name} was closed and task process is dead - marking as INTERRUPTED")
+                    else:
+                        print(f"CONFIRMED: Task process is now dead - marking as INTERRUPTED")
+                    cleanup_orphaned_processes(pid_file, task_name)
+                    return "Interrupted"
+                else:
+                    # Terminal closed but task still running - warn only ONCE
+                    if not terminal_closed_warned:
+                        print(f"WARNING: Terminal window for {task_name} was closed (task still running in background - monitoring...)")
+                        terminal_closed_warned = True
+                    # Continue monitoring silently
+
+            last_terminal_check = current_time
+
+        # SECONDARY: Deep process health check (every 5 minutes, only if status stale)
         if current_time - last_process_check > process_check_interval:
             # Only perform aggressive checks if status file is stale
             if current_time - last_status_update > status_file_grace_period:
@@ -1117,10 +1143,54 @@ def monitor_with_process_tree_csh(process, status_file, pid_file, task_name, max
                     return "Interrupted"
             last_process_check = current_time
 
-        time.sleep(5)  # Check status file every 5 seconds (increased from 2)
+        time.sleep(2)  # Check status file every 2 seconds
 
     return "Interrupted" if interrupted else "Unknown"
 
+
+def detect_terminal_closed_fast(terminal_process, task_name):
+    """
+    FAST detection: Check if terminal window process has died
+    This detects when user clicks "X" on terminal window within 10 seconds
+    """
+    try:
+        # Check if terminal process is still running
+        if terminal_process and terminal_process.poll() is not None:
+            # Terminal process has exited
+            return True
+        return False
+    except Exception as e:
+        print(f"Error checking terminal for {task_name}: {e}")
+        return False
+
+def check_task_process_alive(pid_file, task_name):
+    """
+    Check if the actual csh task process is still alive
+    Returns True if process is alive, False if dead
+    """
+    try:
+        if not os.path.exists(pid_file):
+            return False
+
+        with open(pid_file, 'r') as f:
+            csh_pid = int(f.read().strip())
+
+        if not psutil.pid_exists(csh_pid):
+            return False
+
+        try:
+            proc = psutil.Process(csh_pid)
+            # Check if process is not zombie
+            if proc.status() == psutil.STATUS_ZOMBIE:
+                return False
+            # Process exists and is not zombie
+            return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            return False
+
+    except Exception as e:
+        print(f"Error checking task process for {task_name}: {e}")
+        return False
 
 def detect_accidental_closure_csh_relaxed(pid_file, task_name):
     """
