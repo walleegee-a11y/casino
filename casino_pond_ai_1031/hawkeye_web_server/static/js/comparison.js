@@ -266,7 +266,14 @@ function renderNormalView() {
             sortedTasks.forEach(taskName => {
                 html += '<tr>';
                 html += '<td style="font-weight: normal; background: #f8f9fa; position: sticky; left: 0; z-index: 20; min-width: ' + columnWidths.firstColumn + 'px; max-width: ' + (columnWidths.firstColumn + 50) + 'px; border-right: 2px solid #555;">' + keyword + unit + '</td>';
-                html += '<td style="font-weight: normal; background: #f8f9fa; color: #2c3e50; position: sticky; left: ' + columnWidths.firstColumn + 'px; z-index: 20; min-width: ' + columnWidths.secondColumn + 'px; max-width: ' + (columnWidths.secondColumn + 50) + 'px; border-right: 2px solid #555; box-shadow: 2px 0 4px rgba(0,0,0,0.1);">' + taskName + '</td>';
+
+                // Apply special styling for aggregate tasks (ending with "_all")
+                const isAggregate = taskName.endsWith('_all');
+                const taskStyle = isAggregate
+                    ? 'font-weight: bold; background: #3498db; color: white; position: sticky; left: ' + columnWidths.firstColumn + 'px; z-index: 20; min-width: ' + columnWidths.secondColumn + 'px; max-width: ' + (columnWidths.secondColumn + 50) + 'px; border-right: 2px solid #555; box-shadow: 2px 0 4px rgba(0,0,0,0.1);'
+                    : 'font-weight: normal; background: #f8f9fa; color: #2c3e50; position: sticky; left: ' + columnWidths.firstColumn + 'px; z-index: 20; min-width: ' + columnWidths.secondColumn + 'px; max-width: ' + (columnWidths.secondColumn + 50) + 'px; border-right: 2px solid #555; box-shadow: 2px 0 4px rgba(0,0,0,0.1);';
+
+                html += '<td style="' + taskStyle + '">' + taskName + '</td>';
 
                 visibleRuns.forEach(run => {
                     let value = '--';

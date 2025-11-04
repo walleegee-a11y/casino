@@ -2,12 +2,106 @@
 
 import os
 import tempfile
+import yaml
 from datetime import datetime
 from flask import Blueprint, jsonify, request, session, send_file
 from hawkeye_web_server.core.archive_manager import init_archive, get_archive
 
 
 api_bp = Blueprint('api', __name__)
+
+
+def aggregate_tasks_to_job(tasks):
+    """
+    Aggregate multiple task results into a single job-level aggregate
+
+    Args:
+        tasks (dict): Dictionary of task_name -> task_data
+
+    Returns:
+        dict: Aggregated data dictionary with keywords
+    """
+    if not tasks:
+        return {'keywords': {}}
+
+    # Aggregate keywords
+    aggregate_keywords = {}
+    for task_name, task_data in tasks.items():
+        for kw_name, kw_data in task_data.get('keywords', {}).items():
+            if kw_name not in aggregate_keywords:
+                # First occurrence - initialize
+                aggregate_keywords[kw_name] = {
+                    'values': [],
+                    'unit': kw_data.get('unit', ''),
+                    'type': kw_data.get('type', '')
+                }
+
+            # Collect value
+            value = kw_data.get('value')
+            if value is not None:
+                aggregate_keywords[kw_name]['values'].append(value)
+
+    # Compute aggregate values for each keyword
+    final_keywords = {}
+    for kw_name, kw_info in aggregate_keywords.items():
+        values = kw_info['values']
+        if not values:
+            continue
+
+        # Determine aggregation strategy based on keyword type
+        if all(isinstance(v, (int, float)) for v in values):
+            # Numeric values - choose aggregation strategy
+            if 'error' in kw_name.lower() or 'warning' in kw_name.lower() or '_num' in kw_name.lower() or 'count' in kw_name.lower():
+                # Sum for counts and violations
+                aggregate_value = sum(values)
+            elif 'wns' in kw_name.lower():
+                # WNS (Worst Negative Slack): take MIN (most negative = worst)
+                aggregate_value = min(values)
+            elif 'tns' in kw_name.lower():
+                # TNS (Total Negative Slack): SUM all slack violations
+                aggregate_value = sum(values)
+            elif 'nov' in kw_name.lower():
+                # NOV (Number of Violations): SUM
+                aggregate_value = sum(values)
+            elif 'cpu_time' in kw_name.lower() or 'real_time' in kw_name.lower() or 'runtime' in kw_name.lower():
+                # Runtime: SUM
+                aggregate_value = sum(values)
+            elif 'area' in kw_name.lower() or 'utilization' in kw_name.lower() or 'density' in kw_name.lower():
+                # Area/utilization: use LAST value (final stage)
+                aggregate_value = values[-1]
+            elif 'overflow' in kw_name.lower() or 'hotspot' in kw_name.lower():
+                # Congestion: take MAX (worst)
+                aggregate_value = max(values)
+            else:
+                # Default: AVERAGE for other metrics
+                aggregate_value = sum(values) / len(values)
+
+            final_keywords[kw_name] = {
+                'value': aggregate_value,
+                'unit': kw_info['unit'],
+                'type': kw_info['type']
+            }
+        elif all(isinstance(v, str) for v in values):
+            # String values - concatenate or pick representative
+            if len(set(values)) == 1:
+                # All same - use that value
+                final_keywords[kw_name] = {
+                    'value': values[0],
+                    'unit': kw_info['unit'],
+                    'type': kw_info['type']
+                }
+            else:
+                # Different values - show "MIXED"
+                final_keywords[kw_name] = {
+                    'value': "MIXED",
+                    'unit': kw_info['unit'],
+                    'type': kw_info['type']
+                }
+
+    return {
+        'keywords': final_keywords,
+        'task_count': len(tasks)
+    }
 
 
 @api_bp.route('/select-project', methods=['POST'])
@@ -58,13 +152,28 @@ def get_current_project():
 def get_vista_config():
     """Get vista_casino.yaml configuration"""
     try:
-        import yaml
-
         config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'vista_casino.yaml')
         if os.path.exists(config_path):
             with open(config_path, 'r', encoding='utf-8') as f:
                 config = yaml.safe_load(f)
             return jsonify(config)
+        else:
+            return jsonify({'error': 'vista_casino.yaml not found'}), 404
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@api_bp.route('/jobs')
+def get_jobs():
+    """Get jobs configuration from vista_casino.yaml"""
+    try:
+        config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'vista_casino.yaml')
+        if os.path.exists(config_path):
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config = yaml.safe_load(f)
+
+            jobs = config.get('jobs', {})
+            return jsonify(jobs)
         else:
             return jsonify({'error': 'vista_casino.yaml not found'}), 404
     except Exception as e:

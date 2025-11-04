@@ -19,13 +19,209 @@ let activeFilters = {
     'block': [],
     'dk': []
 };
+let jobsConfig = null;  // Store jobs configuration from vista_casino.yaml
+let currentViewMode = 'task';  // 'task', 'job', or 'both'
+
+/**
+ * Aggregate multiple tasks into a job-level aggregate
+ * @param {Object} tasks - Dictionary of task_name -> array of keyword objects
+ * @returns {Array} - Array of aggregated keyword objects
+ */
+function aggregateTasksToJob(tasks) {
+    if (!tasks || Object.keys(tasks).length === 0) {
+        return [];
+    }
+
+    // Aggregate keywords - tasks is { "DRC": [...keywords...], "LVS": [...keywords...] }
+    const aggregateKeywords = {};
+    for (const taskName in tasks) {
+        const keywordsArray = tasks[taskName];  // This is an ARRAY of keyword objects
+
+        if (!Array.isArray(keywordsArray)) {
+            console.warn('Task keywords is not an array:', taskName, keywordsArray);
+            continue;
+        }
+
+        // Iterate through the array of keywords for this task
+        keywordsArray.forEach(kwData => {
+            const kwName = kwData.keyword_name;
+
+            if (!aggregateKeywords[kwName]) {
+                // First occurrence - initialize
+                aggregateKeywords[kwName] = {
+                    values: [],
+                    unit: kwData.keyword_unit || '',
+                    type: kwData.keyword_type || ''
+                };
+            }
+
+            // Collect value
+            const value = kwData.keyword_value;
+            if (value !== null && value !== undefined && value !== '' && value !== '--') {
+                // Try to parse as number
+                const numValue = parseFloat(value);
+                if (!isNaN(numValue)) {
+                    aggregateKeywords[kwName].values.push(numValue);
+                } else {
+                    aggregateKeywords[kwName].values.push(value);
+                }
+            }
+        });
+    }
+
+    // Compute aggregate values for each keyword
+    const finalKeywordsArray = [];
+    for (const kwName in aggregateKeywords) {
+        const kwInfo = aggregateKeywords[kwName];
+        const values = kwInfo.values;
+
+        if (!values || values.length === 0) {
+            continue;
+        }
+
+        // Determine aggregation strategy based on keyword type
+        if (values.every(v => typeof v === 'number')) {
+            // Numeric values - choose aggregation strategy
+            let aggregateValue;
+
+            if (kwName.toLowerCase().includes('error') ||
+                kwName.toLowerCase().includes('warning') ||
+                kwName.toLowerCase().includes('_num') ||
+                kwName.toLowerCase().includes('count')) {
+                // Sum for counts and violations
+                aggregateValue = values.reduce((a, b) => a + b, 0);
+            } else if (kwName.toLowerCase().includes('wns')) {
+                // WNS (Worst Negative Slack): take MIN (most negative = worst)
+                aggregateValue = Math.min(...values);
+            } else if (kwName.toLowerCase().includes('tns')) {
+                // TNS (Total Negative Slack): SUM all slack violations
+                aggregateValue = values.reduce((a, b) => a + b, 0);
+            } else if (kwName.toLowerCase().includes('nov')) {
+                // NOV (Number of Violations): SUM
+                aggregateValue = values.reduce((a, b) => a + b, 0);
+            } else if (kwName.toLowerCase().includes('cpu_time') ||
+                       kwName.toLowerCase().includes('real_time') ||
+                       kwName.toLowerCase().includes('runtime')) {
+                // Runtime: SUM
+                aggregateValue = values.reduce((a, b) => a + b, 0);
+            } else if (kwName.toLowerCase().includes('area') ||
+                       kwName.toLowerCase().includes('utilization') ||
+                       kwName.toLowerCase().includes('density')) {
+                // Area/utilization: use LAST value (final stage)
+                aggregateValue = values[values.length - 1];
+            } else if (kwName.toLowerCase().includes('overflow') ||
+                       kwName.toLowerCase().includes('hotspot')) {
+                // Congestion: take MAX (worst)
+                aggregateValue = Math.max(...values);
+            } else {
+                // Default: AVERAGE for other metrics
+                aggregateValue = values.reduce((a, b) => a + b, 0) / values.length;
+            }
+
+            finalKeywordsArray.push({
+                keyword_name: kwName,
+                keyword_value: aggregateValue,
+                keyword_unit: kwInfo.unit,
+                keyword_type: kwInfo.type
+            });
+        } else if (values.every(v => typeof v === 'string')) {
+            // String values - concatenate or pick representative
+            const uniqueValues = [...new Set(values)];
+            if (uniqueValues.length === 1) {
+                // All same - use that value
+                finalKeywordsArray.push({
+                    keyword_name: kwName,
+                    keyword_value: values[0],
+                    keyword_unit: kwInfo.unit,
+                    keyword_type: kwInfo.type
+                });
+            } else {
+                // Different values - show "MIXED"
+                finalKeywordsArray.push({
+                    keyword_name: kwName,
+                    keyword_value: "MIXED",
+                    keyword_unit: kwInfo.unit,
+                    keyword_type: kwInfo.type
+                });
+            }
+        }
+    }
+
+    return finalKeywordsArray;
+}
+
+/**
+ * Load jobs configuration from vista_casino.yaml
+ */
+async function loadJobsConfig() {
+    try {
+        const response = await fetch('/api/jobs');
+        if (response.ok) {
+            jobsConfig = await response.json();
+            console.log('Loaded jobs config:', Object.keys(jobsConfig || {}).length, 'jobs');
+        } else {
+            console.warn('Failed to load jobs config');
+        }
+    } catch (error) {
+        console.error('Error loading jobs config:', error);
+    }
+}
+
+/**
+ * Compute aggregates for a run's keywords
+ * @param {Object} runKeywords - Run's keywords grouped by task
+ * @returns {Object} - Keywords with aggregates added
+ */
+function computeAggregatesForRun(runKeywords) {
+    if (!jobsConfig || !runKeywords) {
+        return runKeywords;
+    }
+
+    const result = { ...runKeywords };
+
+    // For each job, compute aggregate if all tasks are present
+    for (const jobName in jobsConfig) {
+        const job = jobsConfig[jobName];
+        const tasksList = job.tasks || [];
+
+        // Collect tasks for this job
+        const jobTasks = {};
+        let allTasksPresent = true;
+
+        for (const taskName of tasksList) {
+            if (runKeywords[taskName]) {
+                jobTasks[taskName] = runKeywords[taskName];
+            } else {
+                // Task missing - can't compute aggregate
+                allTasksPresent = false;
+                break;
+            }
+        }
+
+        // Compute aggregate if all tasks present
+        if (allTasksPresent && Object.keys(jobTasks).length > 0) {
+            const aggregateKeywordsArray = aggregateTasksToJob(jobTasks);
+            const aggregateName = `${jobName}_all`;
+
+            // Add task_name property to each keyword
+            aggregateKeywordsArray.forEach(kw => {
+                kw.task_name = aggregateName;
+            });
+
+            result[aggregateName] = aggregateKeywordsArray;
+        }
+    }
+
+    return result;
+}
 
 // Load statistics on page load
 document.addEventListener('DOMContentLoaded', function() {
-    // Load current project name and statistics together
+    // Load current project name, statistics, and jobs config together
     Promise.all([
         fetch('/api/current-project').then(r => r.json()),
-        fetch('/api/statistics').then(r => r.json())
+        fetch('/api/statistics').then(r => r.json()),
+        loadJobsConfig()
     ]).then(([projectData, stats]) => {
         if (projectData.project) {
             document.getElementById('current-project-name').innerHTML =
@@ -487,18 +683,35 @@ function showComparison(runs) {
             formattedRun.keywords[taskName].push(keyword);
         });
 
+        // Compute aggregates for this run (pv_all, sta_pt_all, apr_inn_all, etc.)
+        formattedRun.keywords = computeAggregatesForRun(formattedRun.keywords);
+
         return formattedRun;
+    });
+
+    // Recollect all keyword names including aggregates
+    var allKeywordNamesWithAggregates = new Set();
+    formattedRuns.forEach(function(run) {
+        Object.values(run.keywords).forEach(function(taskKeywords) {
+            if (Array.isArray(taskKeywords)) {
+                taskKeywords.forEach(function(keyword) {
+                    if (keyword && keyword.keyword_name) {
+                        allKeywordNamesWithAggregates.add(keyword.keyword_name);
+                    }
+                });
+            }
+        });
     });
 
     var comparisonData = {
         runs: formattedRuns,
-        keywords: Array.from(allKeywordNames).sort(),
-        originalKeywords: Array.from(allKeywordNames).sort(),
+        keywords: Array.from(allKeywordNamesWithAggregates).sort(),
+        originalKeywords: Array.from(allKeywordNamesWithAggregates).sort(),
         isTransposed: false,
         timestamp: new Date().toISOString(),
         comparisonId: 'comparison_' + Date.now(),
         runCount: formattedRuns.length,
-        keywordCount: allKeywordNames.size
+        keywordCount: allKeywordNamesWithAggregates.size
     };
 
     console.log('Final comparison data:', comparisonData);
