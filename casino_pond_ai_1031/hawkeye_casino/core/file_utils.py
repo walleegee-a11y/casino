@@ -184,6 +184,8 @@ class FileAnalyzer:
             return FileAnalyzer._extract_sta_noise_count(content, pattern, keyword_config, compiled_pattern)
         elif data_type == 'sta_noise_worst':
             return FileAnalyzer._extract_sta_noise_worst(content, pattern, keyword_config, compiled_pattern)
+        elif data_type == 'perc_rulecheck':
+            return FileAnalyzer._extract_perc_rulecheck(content, pattern, keyword_name, keyword_config, compiled_pattern)
         elif data_type == 'count':
             return FileAnalyzer._extract_count(content, pattern, compiled_pattern)
         elif data_type == 'multiple_values':
@@ -908,6 +910,134 @@ class FileAnalyzer:
                 except ValueError:
                     return None
         return None
+
+    @staticmethod
+    def _extract_perc_rulecheck(content: str, pattern: str, keyword_name: str, keyword_config: dict, compiled_pattern=None) -> dict:
+        """Extract DRC RULECHECK statistics with dynamic keyword generation
+
+        Used for PV tasks: DRC, FlipChip, PERC, and other Calibre verification tasks
+        that output per-rule violation counts.
+
+        Report format (section between markers):
+            === DRC RULECHECK STATISTICS
+            ===
+            RULECHECK LUP.7.6.0U ... TOTAL Result Count = 0   (0)
+            RULECHECK ESD.43.1gU ... TOTAL Result Count = 0   (0)
+            RULECHECK LUP.2 ........ TOTAL Result Count = 104 (6450)
+            RULECHECK LUP.1 ........ TOTAL Result Count = 40  (783)
+            ===
+
+        Pattern captures: (rule_name, cell_count, flatten_count)
+        Pattern example: r'RULECHECK\\s+(\\S+)\\s+\\.+\\s+TOTAL Result Count\\s+=\\s+(\\d+)\\s+\\((\\d+)\\)'
+
+        Args:
+            content: File content
+            pattern: Regex pattern to match RULECHECK lines
+            keyword_name: Base keyword name used as prefix for generated keywords
+            keyword_config: Full keyword configuration dict with:
+                           - section_start: Start marker (e.g., "=== DRC RULECHECK STATISTICS")
+                           - section_end: End marker (e.g., "===")
+                           - skip_zero: Skip rules with "0 (0)" if True
+            compiled_pattern: Pre-compiled regex pattern (optional, for performance)
+
+        Returns:
+            Dictionary with dynamic keywords using keyword_name as prefix: {
+                '{keyword_name}_{rule}_cell': cell_count,
+                '{keyword_name}_{rule}_flatten': flatten_count
+            }
+            Examples:
+                'perc_ldl_violations_LUP.2_cell': 104
+                'drc_detailed_M1.W.1_flatten': 6450
+        """
+        try:
+            section_start_marker = keyword_config.get('section_start', '')
+            section_end_marker = keyword_config.get('section_end', '')
+            skip_zero = keyword_config.get('skip_zero', False)
+
+            print(f"      DEBUG: Extracting '{keyword_name}' rulecheck statistics")
+            print(f"      DEBUG: Section markers: start='{section_start_marker}', end='{section_end_marker}'")
+            print(f"      DEBUG: Skip zero violations: {skip_zero}")
+
+            # Extract section content between markers
+            section_content = content
+
+            if section_start_marker:
+                section_start_match = re.search(re.escape(section_start_marker), content, re.MULTILINE)
+                if not section_start_match:
+                    print(f"      DEBUG: Section start marker not found")
+                    return {}
+
+                section_start_pos = section_start_match.end()
+
+                # Find section end marker (after start marker)
+                if section_end_marker:
+                    # Search for the SECOND occurrence of section_end_marker
+                    # (first one is part of the start marker line)
+                    remaining_content = content[section_start_pos:]
+                    section_end_match = re.search(re.escape(section_end_marker), remaining_content, re.MULTILINE)
+
+                    if section_end_match:
+                        section_end_pos = section_start_pos + section_end_match.start()
+                        section_content = content[section_start_pos:section_end_pos]
+                    else:
+                        section_content = remaining_content
+                else:
+                    section_content = content[section_start_pos:]
+
+            print(f"      DEBUG: Section content length: {len(section_content)} characters")
+
+            # Find all RULECHECK matches in the section
+            if compiled_pattern:
+                matches = list(compiled_pattern.finditer(section_content))
+            else:
+                matches = list(re.finditer(pattern, section_content, re.MULTILINE))
+
+            if not matches:
+                print(f"      DEBUG: No RULECHECK entries found in section")
+                return {}
+
+            print(f"      DEBUG: Found {len(matches)} RULECHECK entries")
+
+            # Build result dictionary with dynamic keywords
+            result = {}
+            rules_processed = 0
+            rules_skipped = 0
+
+            for match in matches:
+                if len(match.groups()) != 3:
+                    print(f"      WARNING: RULECHECK match doesn't have 3 groups, skipping")
+                    continue
+
+                rule_name = match.group(1)
+                cell_count = int(match.group(2))
+                flatten_count = int(match.group(3))
+
+                # Skip zero violations if requested
+                if skip_zero and cell_count == 0 and flatten_count == 0:
+                    rules_skipped += 1
+                    continue
+
+                # Generate dynamic keywords using keyword_name as prefix
+                # Format: {keyword_name}_{rule_name}_cell and {keyword_name}_{rule_name}_flatten
+                cell_keyword = f"{keyword_name}_{rule_name}_cell"
+                flatten_keyword = f"{keyword_name}_{rule_name}_flatten"
+
+                result[cell_keyword] = float(cell_count)
+                result[flatten_keyword] = float(flatten_count)
+
+                rules_processed += 1
+                print(f"      DEBUG: Processed rule '{rule_name}': cell={cell_count}, flatten={flatten_count}")
+
+            print(f"      DEBUG: '{keyword_name}' extraction complete: {rules_processed} rules processed, {rules_skipped} rules skipped")
+            print(f"      DEBUG: Generated {len(result)} dynamic keywords")
+
+            return result
+
+        except Exception as e:
+            print(f"      ERROR: Exception in _extract_perc_rulecheck: {e}")
+            import traceback
+            print(f"      Traceback: {traceback.format_exc()}")
+            return {}
 
     @staticmethod
     def _extract_number(content: str, pattern: str, compiled_pattern=None) -> Optional[float]:

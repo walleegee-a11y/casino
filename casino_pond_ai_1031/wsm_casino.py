@@ -1,4 +1,3 @@
-
 #!/usr/local/bin/python3.12
 
 import os
@@ -489,6 +488,35 @@ def process_stage_directories(base_path, dirs_to_create, env_vars, run_ver):
             print(f"Skipping directory: {directory}")  # Debugging skipped directories
 
 
+def notify_run_creation(run_path, run_version, tree_manager_history_service=None):
+    """
+    Notify that a run directory has been created.
+    If called from casino_gui with history service, updates it directly.
+    Otherwise, this is a no-op (for standalone execution).
+
+    Args:
+        run_path: Full path to the created run directory
+        run_version: Run version identifier
+        tree_manager_history_service: Optional DirectoryHistoryService instance from Tree Manager
+    """
+    if tree_manager_history_service is not None:
+        try:
+            from pathlib import Path
+            from datetime import datetime
+
+            # Add create_run operation to history service
+            tree_manager_history_service.add_entry(
+                path=Path(run_path),
+                operation="create_run",
+                details=f"Created run directory: {run_version}"
+            )
+            print(f"\n✓ Run creation added to Tree Manager history")
+            print(f"  - Run: {run_version}")
+            print(f"  - Path: {run_path}")
+            print(f"  - Check Recent area in Tree Manager for the 'Run' button\n")
+        except Exception as e:
+            print(f"\n⚠ Warning: Could not update Tree Manager history: {e}\n")
+
 def write_casino_env_vars(env_vars, runs_path):
     """
     Write environment variables to config_casino.csh in organized sections:
@@ -633,6 +661,53 @@ def main():
 
     # Write casino environment variables to con_casino.csh file
     write_casino_env_vars(env_vars, runs_path)
+
+    # ===== Add run creation to directory history =====
+    print("\n" + "="*70)
+    print("Recording run creation in directory history...")
+    print("="*70)
+
+    try:
+        from pathlib import Path
+        from history_utils import add_run_creation_history
+
+        # Get full path to the created run directory
+        full_run_path = Path(runs_path).absolute()
+
+        # Project base should be prj_base + prj_name (e.g., /mnt/data/prjs/ANA6716)
+        prj_base_dir = Path(env_vars.get('casino_prj_base', '.'))
+        prj_name = env_vars['casino_prj_name']
+        project_directory = prj_base_dir / prj_name
+
+        # Add history entry for run creation
+        success, message = add_run_creation_history(
+            run_path=full_run_path,
+            run_version=env_vars['casino_run_ver'],
+            project_base=project_directory,
+            project_name=prj_name
+        )
+
+        if success:
+            print(f"✓ {message}")
+            print(f"  - Run path: {full_run_path}")
+            print(f"  - Run version: {env_vars['casino_run_ver']}")
+            print(f"  - User: {env_vars['casino_whoami']}")
+            print(f"  - This will appear as a 'Run' button in Tree Manager's Recent area")
+        else:
+            print(f"⚠ Warning: {message}")
+
+    except ImportError as e:
+        print(f"⚠ Warning: history_utils.py not found - skipping history update")
+        print(f"  Error: {e}")
+        print(f"  Note: History tracking is optional and won't affect run creation")
+    except Exception as e:
+        print(f"⚠ Warning: Could not update directory history: {e}")
+        print(f"  Note: This is non-fatal - run creation was successful")
+        import traceback
+        traceback.print_exc()
+
+    print("="*70 + "\n")
+    # ===== End history update =====
 
 if __name__ == "__main__":
     main()

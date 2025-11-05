@@ -300,6 +300,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, 'quick_history') and self.quick_history:
             self.quick_history.navigate_requested.connect(self.navigate_to_path_from_history)
 
+        # Auto-refresh tree when new directories are created (e.g., via wsm_casino)
+        self.history_service.tree_refresh_needed.connect(self.refresh_directory_tree)
+
         # Change detection connections
         self.change_service.changes_detected.connect(self.on_changes_detected)
         self.updated_dirs_widget.navigate_requested.connect(self.navigate_to_path_from_update)

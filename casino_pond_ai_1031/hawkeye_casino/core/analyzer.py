@@ -466,6 +466,22 @@ class HawkeyeAnalyzer:
                 }
                 print(f"      Generated '{individual_keyword_name}': {value}")
 
+        # Handle perc_rulecheck type - returns dict with dynamic keywords
+        elif keyword_type == 'perc_rulecheck' and keyword_value is not None and \
+             isinstance(keyword_value, dict):
+            print(f"      DEBUG: Processing perc_rulecheck with {len(keyword_value)} dynamic keywords")
+            for perc_keyword_name, value in keyword_value.items():
+                task_data['keywords'][perc_keyword_name] = {
+                    'value': value,
+                    'type': 'number',
+                    'unit': keyword_config.get('unit', ''),
+                    'color': keyword_config.get('color', ''),
+                    'pattern': keyword_pattern,
+                    'file_name': specific_file,
+                    'original_keyword': keyword_name
+                }
+                print(f"      Generated PERC keyword '{perc_keyword_name}': {value}")
+
         # Handle multiple_values type
         elif keyword_type == 'multiple_values' and keyword_value is not None and pair_value:
             value_names = pair_value.split()
@@ -510,6 +526,8 @@ class HawkeyeAnalyzer:
                 print(f"      Found '{keyword_name}' with {len(keyword_value)} values")
             elif keyword_type == 'dynamic_table_row':
                 print(f"      Found '{keyword_name}' with {len(keyword_value)} columns")
+            elif keyword_type == 'perc_rulecheck':
+                print(f"      Found '{keyword_name}' with {len(keyword_value)} dynamic keywords")
             else:
                 print(f"      Found '{keyword_name}': {keyword_value}")
         else:

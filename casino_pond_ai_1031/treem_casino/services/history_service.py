@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, QFileSystemWatcher
 import json
 import getpass
 
@@ -75,6 +75,7 @@ class DirectoryHistoryService(QObject):
     # Signals
     history_changed = pyqtSignal()
     current_changed = pyqtSignal(Path, str)  # path, operation
+    tree_refresh_needed = pyqtSignal()  # Signal to refresh tree when new directories created
 
     def __init__(self, config: AppConfig, max_history: int = 50):
         super().__init__()
@@ -86,8 +87,46 @@ class DirectoryHistoryService(QObject):
         self.history: List[HistoryEntry] = []
         self.current_index: int = -1
 
+        # File watcher for automatic reload when history file changes
+        self.file_watcher = QFileSystemWatcher()
+        self._setup_file_watcher()
+
         # Load user-specific history
         self.load_history()
+
+    def _setup_file_watcher(self):
+        """Setup file watcher to detect external changes to history file."""
+        history_file = self.get_history_file_path()
+        if history_file.exists():
+            self.file_watcher.addPath(str(history_file))
+
+        # Watch parent directory to detect when file is created
+        if history_file.parent.exists():
+            self.file_watcher.addPath(str(history_file.parent))
+
+        # Connect signals
+        self.file_watcher.fileChanged.connect(self._on_history_file_changed)
+        self.file_watcher.directoryChanged.connect(self._on_history_directory_changed)
+
+    def _on_history_file_changed(self, path: str):
+        """Handle history file change event."""
+        print(f"[History] Detected change in history file: {path}")
+
+        # Re-add the file to the watcher (Qt stops watching after a change)
+        history_file = self.get_history_file_path()
+        if history_file.exists() and str(history_file) not in self.file_watcher.files():
+            self.file_watcher.addPath(str(history_file))
+
+        self.load_history()
+
+    def _on_history_directory_changed(self, path: str):
+        """Handle directory change (file created/deleted)."""
+        history_file = self.get_history_file_path()
+        if history_file.exists() and str(history_file) not in self.file_watcher.files():
+            # File was created, start watching it
+            self.file_watcher.addPath(str(history_file))
+            print(f"[History] Started watching new history file: {history_file}")
+            self.load_history()
 
     def get_history_file_path(self) -> Path:
         """Get user-specific history file path in project directory."""
@@ -283,6 +322,15 @@ class DirectoryHistoryService(QObject):
                 self.current_index = len(self.history) - 1
 
             print(f"Loaded {len(self.history)} history entries for user {self.current_user}")
+
+            # Emit signal to notify listeners that history has changed
+            self.history_changed.emit()
+
+            # Check if the most recent entry is a create_run operation
+            # If so, emit tree refresh signal to update directory tree
+            if self.history and self.history[-1].operation == "create_run":
+                print(f"[History] Detected new run creation, triggering tree refresh")
+                self.tree_refresh_needed.emit()
 
         except Exception as e:
             print(f"Warning: Could not load history for user {self.current_user}: {e}")
