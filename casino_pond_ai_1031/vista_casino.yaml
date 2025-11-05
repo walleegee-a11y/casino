@@ -44,7 +44,7 @@ jobs:
 
   pv:
     description: "Physical Verification"
-    tasks: ["DRC", "LVS", "FlipChip"]
+    tasks: ["DRC", "LVS", "FlipChip", "PERC"]
 
   psi:
     description: "PSI"
@@ -369,12 +369,12 @@ task_templates:
       # Detailed per-rule DRC violations
       - name: "drc_detailed"
         group: "pv_drc"
-        pattern: "RULECHECK\\s+(\\S+)\\s+\\.+\\s+TOTAL Result Count\\s+=\\s+(\\d+)\\s+\\((\\d+)\\)"
+        pattern: "RULECHECK\\s+(\\S+)\\s+\\.+\\s+TOTAL Result Count\\s+=\\s+(\\d+)\\s*\\((\\d+)\\)"
         type: "perc_rulecheck"
         unit: ""
         file_name: "01_DRC/DRC_RES.sum"
-        section_start: "RULECHECK"
-        section_end: "TOTAL DRC Results Generated"
+        section_start: "--- RULECHECK RESULTS STATISTICS"
+        section_end: "--- SUMMARY"
         skip_zero: true
 #      - name: "cpu_time"
 #        group: "pv_runtime"
@@ -423,12 +423,12 @@ task_templates:
       # Detailed per-rule FlipChip violations
       - name: "flipchip_detailed"
         group: "pv_flipchip"
-        pattern: "RULECHECK\\s+(\\S+)\\s+\\.+\\s+TOTAL Result Count\\s+=\\s+(\\d+)\\s+\\((\\d+)\\)"
+        pattern: "RULECHECK\\s+(\\S+)\\s+\\.+\\s+TOTAL Result Count\\s+=\\s+(\\d+)\\s*\\((\\d+)\\)"
         type: "perc_rulecheck"
         unit: ""
         file_name: "05_FlipChip/DRC.rep"
-        section_start: "RULECHECK"
-        section_end: "TOTAL DRC Results Generated"
+        section_start: "--- RULECHECK RESULTS STATISTICS"
+        section_end: "--- SUMMARY"
         skip_zero: true
 
   # Template for Calibre PV PERC task
@@ -441,18 +441,33 @@ task_templates:
       - "09_PERC/perc.rep"
       - "09_PERC/perc.rep.ldl"
     keywords:
-      # PERC LDL analysis - extracts non-zero rule violations from DRC RULECHECK STATISTICS section
+      # PERC report analysis - extracts from RULECHECK SUMMARY section (perc.rep)
+      # Matches both formats:
+      #   COMPLETED   7 (7)                       ESD.NET.1gu (...)
+      #   COMPLETED                 41 (41)       INFO_Power_Clamp (...)
+      - name: "perc"
+        group: "pv_perc"
+        pattern: "COMPLETED\\s+(?:(\\d+)\\s*\\((\\d+)\\))?\\s+(?:(\\d+)\\s*\\((\\d+)\\))?\\s+(\\S+)"
+        type: "perc_rulecheck_summary"
+        unit: ""
+        file_name: "09_PERC/perc.rep"
+        section_start: "                                      RULECHECK  SUMMARY"
+        section_end: "                                      PERC PARAMETERS"
+        skip_zero: true  # Ignore rules with "0 (0)" counts
+        skip_info: true  # Ignore rules starting with INFO_
+
+      # PERC LDL analysis - extracts non-zero rule violations from DRC RULECHECK STATISTICS section (perc.rep.ldl)
       - name: "perc_ldl_violations"
         group: "pv_perc"
-        pattern: "RULECHECK\\s+(\\S+)\\s+\\.+\\s+TOTAL Result Count\\s+=\\s+(\\d+)\\s+\\((\\d+)\\)"
+        pattern: "RULECHECK\\s+(\\S+)\\s+\\.+\\s+TOTAL Result Count\\s+=\\s+(\\d+)\\s*\\((\\d+)\\)"
         type: "perc_rulecheck"
         unit: ""
         file_name: "09_PERC/perc.rep.ldl"
         section_start: "=== DRC RULECHECK STATISTICS"
-        section_end: "==="
+        section_end: "=== DRC LAYER STATISTICS"
         skip_zero: true  # Ignore rules with "0 (0)" counts
- 
-      
+
+
   # Template for standard APR tasks (place, cts, postcts, route, postroute, chipfinish)
   standard_apr_task: &standard_apr_task
     description: "Innovus {task_name}"

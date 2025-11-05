@@ -186,6 +186,8 @@ class FileAnalyzer:
             return FileAnalyzer._extract_sta_noise_worst(content, pattern, keyword_config, compiled_pattern)
         elif data_type == 'perc_rulecheck':
             return FileAnalyzer._extract_perc_rulecheck(content, pattern, keyword_name, keyword_config, compiled_pattern)
+        elif data_type == 'perc_rulecheck_summary':
+            return FileAnalyzer._extract_perc_rulecheck_summary(content, pattern, keyword_name, keyword_config, compiled_pattern)
         elif data_type == 'count':
             return FileAnalyzer._extract_count(content, pattern, compiled_pattern)
         elif data_type == 'multiple_values':
@@ -1035,6 +1037,147 @@ class FileAnalyzer:
 
         except Exception as e:
             print(f"      ERROR: Exception in _extract_perc_rulecheck: {e}")
+            import traceback
+            print(f"      Traceback: {traceback.format_exc()}")
+            return {}
+
+    @staticmethod
+    def _extract_perc_rulecheck_summary(content: str, pattern: str, keyword_name: str, keyword_config: dict, compiled_pattern=None) -> dict:
+        """Extract PERC RULECHECK SUMMARY statistics with dual-column format
+
+        Used for perc.rep RULECHECK SUMMARY section with two possible count columns:
+        - Result Count column (left): Normal violations
+        - Info Count column (right): Info entries (usually skipped)
+
+        Report format:
+            Status      Result Count  Info Count    Rule
+            ---------   ------------  ------------  --------------
+            COMPLETED   7 (7)                       ESD.NET.1gu (description...)
+            COMPLETED                 41 (41)       INFO_Power_Clamp (description...)
+
+        Pattern captures 5 groups: (result_cell, result_flatten, info_cell, info_flatten, rule_name)
+        - Groups 1-2: Result Count column (cell, flatten)
+        - Groups 3-4: Info Count column (cell, flatten)
+        - Group 5: Rule name
+
+        Args:
+            content: File content
+            pattern: Regex pattern to match COMPLETED lines
+            keyword_name: Base keyword name used as prefix for generated keywords
+            keyword_config: Full keyword configuration dict with:
+                           - section_start: Start marker
+                           - section_end: End marker
+                           - skip_zero: Skip rules with "0 (0)" if True
+                           - skip_info: Skip rules starting with "INFO_" if True
+            compiled_pattern: Pre-compiled regex pattern (optional, for performance)
+
+        Returns:
+            Dictionary with dynamic keywords using keyword_name as prefix
+        """
+        try:
+            section_start_marker = keyword_config.get('section_start', '')
+            section_end_marker = keyword_config.get('section_end', '')
+            skip_zero = keyword_config.get('skip_zero', False)
+            skip_info = keyword_config.get('skip_info', False)
+
+            print(f"      DEBUG: Extracting '{keyword_name}' PERC summary statistics")
+            print(f"      DEBUG: Section markers: start='{section_start_marker}', end='{section_end_marker}'")
+            print(f"      DEBUG: Skip zero: {skip_zero}, Skip INFO_: {skip_info}")
+
+            # Extract section content between markers
+            section_content = content
+
+            if section_start_marker:
+                section_start_match = re.search(re.escape(section_start_marker), content, re.MULTILINE)
+                if not section_start_match:
+                    print(f"      DEBUG: Section start marker not found")
+                    return {}
+
+                section_start_pos = section_start_match.end()
+
+                if section_end_marker:
+                    remaining_content = content[section_start_pos:]
+                    section_end_match = re.search(re.escape(section_end_marker), remaining_content, re.MULTILINE)
+
+                    if section_end_match:
+                        section_end_pos = section_start_pos + section_end_match.start()
+                        section_content = content[section_start_pos:section_end_pos]
+                    else:
+                        section_content = remaining_content
+                else:
+                    section_content = content[section_start_pos:]
+
+            print(f"      DEBUG: Section content length: {len(section_content)} characters")
+
+            # Find all COMPLETED matches in the section
+            if compiled_pattern:
+                matches = list(compiled_pattern.finditer(section_content))
+            else:
+                matches = list(re.finditer(pattern, section_content, re.MULTILINE))
+
+            if not matches:
+                print(f"      DEBUG: No COMPLETED entries found in section")
+                return {}
+
+            print(f"      DEBUG: Found {len(matches)} COMPLETED entries")
+
+            # Build result dictionary with dynamic keywords
+            result = {}
+            rules_processed = 0
+            rules_skipped = 0
+
+            for match in matches:
+                groups = match.groups()
+                if len(groups) != 5:
+                    print(f"      WARNING: Match doesn't have 5 groups, skipping: {groups}")
+                    continue
+
+                # Extract values from either Result Count or Info Count column
+                result_cell = groups[0]
+                result_flatten = groups[1]
+                info_cell = groups[2]
+                info_flatten = groups[3]
+                rule_name = groups[4]
+
+                # Determine which column has data
+                if result_cell and result_flatten:
+                    cell_count = int(result_cell)
+                    flatten_count = int(result_flatten)
+                elif info_cell and info_flatten:
+                    cell_count = int(info_cell)
+                    flatten_count = int(info_flatten)
+                else:
+                    print(f"      WARNING: No valid counts found, skipping")
+                    continue
+
+                # Skip INFO_ rules if requested
+                if skip_info and rule_name.startswith('INFO_'):
+                    rules_skipped += 1
+                    print(f"      DEBUG: Skipping INFO_ rule: {rule_name}")
+                    continue
+
+                # Skip zero violations if requested
+                if skip_zero and cell_count == 0 and flatten_count == 0:
+                    rules_skipped += 1
+                    continue
+
+                # Generate dynamic keywords using keyword_name as prefix
+                cell_keyword = f"{keyword_name}_{rule_name}_cell"
+                flatten_keyword = f"{keyword_name}_{rule_name}_flatten"
+
+                result[cell_keyword] = float(cell_count)
+                result[flatten_keyword] = float(flatten_count)
+
+                rules_processed += 1
+                print(f"      DEBUG: Processed rule '{rule_name}': cell={cell_count}, flatten={flatten_count}")
+
+            print(f"      DEBUG: '{keyword_name}' extraction complete: {rules_processed} rules processed, {rules_skipped} rules skipped")
+            print(f"      DEBUG: Generated {len(result)} dynamic keywords")
+
+            return result
+
+        except Exception as e:
+            print(f"      ERROR: Exception in _extract_perc_rulecheck_summary: {e}")
             import traceback
             print(f"      Traceback: {traceback.format_exc()}")
             return {}
