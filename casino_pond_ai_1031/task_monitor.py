@@ -7,6 +7,8 @@ import time
 import psutil
 import glob
 import shutil
+import sys
+from io import StringIO
 from datetime import datetime
 from prettytable import PrettyTable
 from pathlib import Path
@@ -78,9 +80,52 @@ def setup_terminal_colors(terminal_type: Optional[TerminalType]):
             'bg_red': ''
         }
 
+def clear_screen_and_home():
+    """Move cursor to home position without clearing (reduces flicker)"""
+    # Just move cursor to home - don't clear
+    # Content will be overwritten by new output
+    sys.stdout.write('\033[H')
+    sys.stdout.flush()
+
 def clear_screen():
-    """Clear the terminal screen"""
-    os.system('clear')
+    """Clear the terminal screen gracefully without blinking"""
+    # Use ANSI escape sequences to move cursor and clear screen
+    # Build everything in a buffer first, then write all at once
+    buffer = []
+    buffer.append('\033[?25l')  # Hide cursor
+    buffer.append('\033[2J')     # Clear entire screen
+    buffer.append('\033[H')      # Move cursor to home (1,1)
+    sys.stdout.write(''.join(buffer))
+    sys.stdout.flush()
+
+def show_cursor():
+    """Show the terminal cursor"""
+    sys.stdout.write('\033[?25h')
+    sys.stdout.flush()
+
+def hide_cursor():
+    """Hide the terminal cursor"""
+    sys.stdout.write('\033[?25l')
+    sys.stdout.flush()
+
+class DisplayBuffer:
+    """Buffer for collecting output before displaying all at once"""
+    def __init__(self):
+        self.lines = []
+
+    def add(self, text=''):
+        """Add a line to the buffer"""
+        self.lines.append(str(text))
+
+    def flush_to_screen(self):
+        """Write all buffered content to screen at once"""
+        # Move to home and write everything at once
+        output = '\033[H' + '\n'.join(self.lines)
+        # Pad with empty lines to clear any leftover content from previous display
+        output += '\n' * 10  # Extra blank lines to clear old content
+        sys.stdout.write(output)
+        sys.stdout.flush()
+        self.lines = []
 
 def format_runtime(seconds: float) -> str:
     """Format runtime in DD:HH:MM:SS format"""
@@ -377,6 +422,8 @@ def main():
     parser.add_argument('--execution-id', help="Unique execution ID for this monitor instance")
     parser.add_argument('--refresh-rate', type=float, default=1.0, help="Refresh rate in seconds")
     parser.add_argument('--clear-on-start', action='store_true', help="Clear completed tasks memory on start for fresh monitoring")
+    parser.add_argument('--singleTerm', action='store_true', help="Single terminal mode flag (informational only)")
+    parser.add_argument('--interactive', action='store_true', help="Interactive mode flag (informational only)")
 
     args = parser.parse_args()
 
@@ -435,274 +482,295 @@ def main():
 
     time.sleep(1)
 
+    # Hide cursor for smoother display updates
+    hide_cursor()
+
     try:
         while True:
-            clear_screen()
-            update_count += 1
+            # Capture all output in a buffer to write at once (prevents flicker)
+            output_buffer = StringIO()
+            old_stdout = sys.stdout
 
-            # Load flow tasks
-            flow_tasks = load_flow_tasks(args.flow)
-            filtered_tasks = filter_tasks_by_range(flow_tasks, args.start, args.end, args.only)
-
-            # FIRST: Detect currently running tasks (check this BEFORE loading completed tasks)
             try:
-                running_tasks = detect_running_tasks(flow_tasks, args.execution_id)
-            except Exception as e:
-                running_tasks = {}
+                sys.stdout = output_buffer
 
-            # Update our memory: track tasks that start running
-            current_time = get_current_time()
-            newly_started_tasks = []
+                update_count += 1
 
-            for task_name, running_info in running_tasks.items():
-                if task_name not in seen_running:
-                    seen_running[task_name] = {
-                        'start_time': running_info['start_time'],
-                        'first_seen': current_time,
-                        'last_seen': current_time
-                    }
-                    newly_started_tasks.append(task_name)
-                else:
-                    seen_running[task_name]['last_seen'] = current_time
+                # Load flow tasks
+                flow_tasks = load_flow_tasks(args.flow)
+                filtered_tasks = filter_tasks_by_range(flow_tasks, args.start, args.end, args.only)
 
-            # SECOND: Load completed tasks from execution-specific file
-            # Since file is execution-specific, we can safely reload it each time to get updates
-            try:
-                file_completed_tasks = load_completed_tasks(args.completed)
-                file_completed_dict = {task.get('name'): task for task in file_completed_tasks if task.get('name')}
+                # FIRST: Detect currently running tasks (check this BEFORE loading completed tasks)
+                try:
+                    running_tasks = detect_running_tasks(flow_tasks, args.execution_id)
+                except Exception as e:
+                    running_tasks = {}
 
-                # Update completed_tasks with latest file data
-                for task_name, file_task in file_completed_dict.items():
-                    # Always update with latest file data since file is execution-specific
-                    if task_name not in running_tasks:  # Don't override currently running tasks
-                        original_status = file_task.get('status', 'completed')
+                # Update our memory: track tasks that start running
+                current_time = get_current_time()
+                newly_started_tasks = []
+
+                for task_name, running_info in running_tasks.items():
+                    if task_name not in seen_running:
+                        seen_running[task_name] = {
+                            'start_time': running_info['start_time'],
+                            'first_seen': current_time,
+                            'last_seen': current_time
+                        }
+                        newly_started_tasks.append(task_name)
+                    else:
+                        seen_running[task_name]['last_seen'] = current_time
+
+                # SECOND: Load completed tasks from execution-specific file
+                # Since file is execution-specific, we can safely reload it each time to get updates
+                try:
+                    file_completed_tasks = load_completed_tasks(args.completed)
+                    file_completed_dict = {task.get('name'): task for task in file_completed_tasks if task.get('name')}
+
+                    # Update completed_tasks with latest file data
+                    for task_name, file_task in file_completed_dict.items():
+                        # Always update with latest file data since file is execution-specific
+                        if task_name not in running_tasks:  # Don't override currently running tasks
+                            original_status = file_task.get('status', 'completed')
+                            completed_tasks[task_name] = {
+                                'start_time': file_task.get('start_time', 'N/A'),
+                                'end_time': file_task.get('end_time', 'N/A'),
+                                'status': original_status
+                            }
+
+                            # Show when new completions are detected
+                            #if update_count > 1 and task_name not in [t for t in completed_tasks.keys() if t != task_name]:
+                                #print(f"NEW COMPLETION: {task_name} -> {original_status}")
+
+                except Exception as e:
+                    file_completed_dict = {}
+
+                # THIRD: Update completed tasks based on transitions from running to not-running
+                # This relies ONLY on our execution-specific memory and PID detection
+                for task_name, task_info in seen_running.items():
+                    if task_name not in running_tasks and task_name not in completed_tasks:
+                        # Task was running but isn't anymore - mark as completed
                         completed_tasks[task_name] = {
-                            'start_time': file_task.get('start_time', 'N/A'),
-                            'end_time': file_task.get('end_time', 'N/A'),
-                            'status': original_status
+                            'start_time': task_info['start_time'],
+                            'end_time': current_time,
+                            'status': 'completed'  # We can't determine success/failure without file data
                         }
 
-                        # Show when new completions are detected
-                        #if update_count > 1 and task_name not in [t for t in completed_tasks.keys() if t != task_name]:
-                            #print(f"NEW COMPLETION: {task_name} -> {original_status}")
+                # Display newly started tasks for immediate feedback
+                #if newly_started_tasks:
+                    #print(f"{colors['green']}{colors['bold']}NEW TASK(S) STARTED:{colors['reset']}")
+                    #for task_name in newly_started_tasks:
+                        #print(f"  {colors['cyan']}? {task_name}{colors['reset']} started at {running_tasks[task_name]['start_time']}")
+                    #print()
 
-            except Exception as e:
-                file_completed_dict = {}
+                # Calculate statistics
+                total_tasks = len(filtered_tasks)
+                running_count = len(running_tasks)
 
-            # THIRD: Update completed tasks based on transitions from running to not-running
-            # This relies ONLY on our execution-specific memory and PID detection
-            for task_name, task_info in seen_running.items():
-                if task_name not in running_tasks and task_name not in completed_tasks:
-                    # Task was running but isn't anymore - mark as completed
-                    completed_tasks[task_name] = {
-                        'start_time': task_info['start_time'],
-                        'end_time': current_time,
-                        'status': 'completed'  # We can't determine success/failure without file data
-                    }
+                # Count completed tasks by status
+                success_count = 0
+                failed_count = 0
+                not_executed_count = 0
+                skipped_count = 0
 
-            # Display newly started tasks for immediate feedback
-            #if newly_started_tasks:
-                #print(f"{colors['green']}{colors['bold']}NEW TASK(S) STARTED:{colors['reset']}")
-                #for task_name in newly_started_tasks:
-                    #print(f"  {colors['cyan']}? {task_name}{colors['reset']} started at {running_tasks[task_name]['start_time']}")
-                #print()
-
-            # Calculate statistics
-            total_tasks = len(filtered_tasks)
-            running_count = len(running_tasks)
-
-            # Count completed tasks by status
-            success_count = 0
-            failed_count = 0
-            not_executed_count = 0
-            skipped_count = 0
-
-            for task_info in completed_tasks.values():
-                status = task_info.get('status', 'unknown').lower()
-                if status == 'success':
-                    success_count += 1
-                elif status in ['failed', 'error', 'interrupted', 'timeout']:
-                    failed_count += 1
-                elif status == 'completed':
-                    success_count += 1  # Treat 'completed' as success
-                elif status in ['not executed']:
-                    not_executed_count += 1
-                elif status in ['skipped']:
-                    skipped_count += 1
-                else:
-                    # FIXED: Don't default unknown statuses to success
-                    # Check if it might be an interrupted task based on status string
-                    if 'interrupt' in status:
-                        failed_count += 1
-                    else:
+                for task_info in completed_tasks.values():
+                    status = task_info.get('status', 'unknown').lower()
+                    if status == 'success':
                         success_count += 1
-
-            waiting_count = total_tasks - running_count - success_count - failed_count - not_executed_count - skipped_count
-
-            # Print header with styling
-            print_header(colors, current_terminal, args.execution_id, monitor_session_id)
-
-            # Status summary with colors
-            status_line = (f"{colors['green']}{success_count} completed{colors['reset']} | "
-                          f"{colors['red']}{failed_count} failed{colors['reset']} | "
-                          f"{colors['cyan']}{running_count} running{colors['reset']} | "
-                          f"{colors['white']}{waiting_count} waiting{colors['reset']}")
-
-            if not_executed_count > 0:
-                status_line += f" | {colors['dim']}{not_executed_count} not executed{colors['reset']}"
-            if skipped_count > 0:
-                status_line += f" | {colors['dim']}{skipped_count} skipped{colors['reset']}"
-
-            print(f"Status: {status_line}")
-
-            # Enhanced progress bar
-            if total_tasks > 0:
-                progress_bar = create_progress_bar(success_count, failed_count, running_count, total_tasks, colors)
-                print(f"Progress: {progress_bar}")
-                if failed_count > 0 or not_executed_count > 0:
-                    legend = (f"Legend: {colors['green']}= Success{colors['reset']}  "
-                             f"{colors['red']}X Failed/Error{colors['reset']}  "
-                             f"{colors['cyan']}~ Running{colors['reset']}  "
-                             f"- Waiting")
-                    print(legend)
-
-            # Monitor statistics
-            monitor_uptime = time.time() - monitor_start_time
-            print(f"Monitor uptime: {format_runtime(monitor_uptime)} | Updates: {update_count}")
-            print()
-
-            # Enhanced status table with colors
-            table = PrettyTable()
-            table.field_names = ["Task Name", "Status", "Start Time", "End Time", "Runtime", "PID"]
-            table.align = "l"
-
-            for task in filtered_tasks:
-                task_name = task['name']
-
-                if task_name in running_tasks:
-                    # Currently running
-                    running_info = running_tasks[task_name]
-                    runtime_seconds = calculate_runtime(running_info['start_time'])
-                    status_display = create_status_display("running", colors)
-
-                    table.add_row([
-                        f"{colors['bold']}{task_name}{colors['reset']}",
-                        status_display,
-                        running_info['start_time'],
-                        "-",
-                        f"{colors['cyan']}{format_runtime(runtime_seconds)}{colors['reset']}",
-                        f"{colors['dim']}{running_info['pid']}{colors['reset']}"
-                    ])
-
-                elif task_name in completed_tasks:
-                    # Completed
-                    completed_info = completed_tasks[task_name]
-                    runtime_seconds = calculate_runtime(completed_info['start_time'], completed_info['end_time'])
-
-                    # Get the actual status and format it properly
-                    actual_status = completed_info.get('status', 'completed')
-                    status_display = create_status_display(actual_status, colors)
-
-                    # Color the runtime based on status
-                    runtime_color = colors['green'] if actual_status.lower() == 'success' else colors['red'] if 'fail' in actual_status.lower() else colors['reset']
-
-                    table.add_row([
-                        task_name,
-                        status_display,
-                        completed_info['start_time'],
-                        completed_info['end_time'],
-                        f"{runtime_color}{format_runtime(runtime_seconds)}{colors['reset']}",
-                        "-"
-                    ])
-
-                else:
-                    # Waiting
-                    status_display = create_status_display("waiting", colors)
-                    table.add_row([
-                        f"{colors['dim']}{task_name}{colors['reset']}",
-                        status_display,
-                        "-",
-                        "-",
-                        "-",
-                        "-"
-                    ])
-
-            print(table)
-            print()
-
-            # Currently running tasks summary
-            if running_count > 0:
-                print(f"{colors['bold']}{colors['cyan']}Currently Running:{colors['reset']}")
-                for task_name, running_info in running_tasks.items():
-                    if any(task['name'] == task_name for task in filtered_tasks):
-                        runtime_seconds = calculate_runtime(running_info['start_time'])
-                        print(f"  {colors['cyan']}{task_name}{colors['reset']} "
-                              f"(PID: {colors['dim']}{running_info['pid']}{colors['reset']}) - "
-                              f"{colors['cyan']}{format_runtime(runtime_seconds)}{colors['reset']}")
-                print()
-
-            # Summary statistics
-            if total_tasks > 0:
-                completion_rate = (success_count + failed_count) / total_tasks * 100
-                success_rate = success_count / (success_count + failed_count) * 100 if (success_count + failed_count) > 0 else 0
-
-                stats_line = (f"Completion: {completion_rate:.1f}% | "
-                             f"Success Rate: {success_rate:.1f}% | "
-                             f"Total Tasks: {total_tasks}")
-                print(f"{colors['dim']}{stats_line}{colors['reset']}")
-
-            # File status indicator
-            files_status = []
-            for file_path, label in [(args.flow, "Flow"), (args.completed, "Completed"), (args.runtime, "Runtime")]:
-                try:
-                    if os.path.exists(file_path):
-                        mtime = os.path.getmtime(file_path)
-                        age = time.time() - mtime
-                        if age < 60:  # Less than 1 minute old
-                            files_status.append(f"{colors['green']}{label}+{colors['reset']}")
-                        else:
-                            files_status.append(f"{colors['dim']}{label}+{colors['reset']}")
+                    elif status in ['failed', 'error', 'interrupted', 'timeout']:
+                        failed_count += 1
+                    elif status == 'completed':
+                        success_count += 1  # Treat 'completed' as success
+                    elif status in ['not executed']:
+                        not_executed_count += 1
+                    elif status in ['skipped']:
+                        skipped_count += 1
                     else:
-                        files_status.append(f"{colors['red']}{label}-{colors['reset']}")
-                except Exception as e:
-                    files_status.append(f"{colors['red']}{label}?{colors['reset']}")
+                        # FIXED: Don't default unknown statuses to success
+                        # Check if it might be an interrupted task based on status string
+                        if 'interrupt' in status:
+                            failed_count += 1
+                        else:
+                            success_count += 1
 
-            print(f"Files: {' '.join(files_status)}")
+                waiting_count = total_tasks - running_count - success_count - failed_count - not_executed_count - skipped_count
 
-            # Show execution context
-            context_info = []
-            if args.start:
-                context_info.append(f"Start: {args.start}")
-            if args.end:
-                context_info.append(f"End: {args.end}")
-            if args.only:
-                context_info.append(f"Only: {args.only}")
-            if args.force:
-                context_info.append("Force mode")
+                # Print header with styling
+                print_header(colors, current_terminal, args.execution_id, monitor_session_id)
 
-            if context_info:
-                print(f"{colors['dim']}Context: {' | '.join(context_info)}{colors['reset']}")
+                # Status summary with colors
+                status_line = (f"{colors['green']}{success_count} completed{colors['reset']} | "
+                              f"{colors['red']}{failed_count} failed{colors['reset']} | "
+                              f"{colors['cyan']}{running_count} running{colors['reset']} | "
+                              f"{colors['white']}{waiting_count} waiting{colors['reset']}")
+
+                if not_executed_count > 0:
+                    status_line += f" | {colors['dim']}{not_executed_count} not executed{colors['reset']}"
+                if skipped_count > 0:
+                    status_line += f" | {colors['dim']}{skipped_count} skipped{colors['reset']}"
+
+                print(f"Status: {status_line}")
+
+                # Enhanced progress bar
+                if total_tasks > 0:
+                    progress_bar = create_progress_bar(success_count, failed_count, running_count, total_tasks, colors)
+                    print(f"Progress: {progress_bar}")
+                    if failed_count > 0 or not_executed_count > 0:
+                        legend = (f"Legend: {colors['green']}= Success{colors['reset']}  "
+                                 f"{colors['red']}X Failed/Error{colors['reset']}  "
+                                 f"{colors['cyan']}~ Running{colors['reset']}  "
+                                 f"- Waiting")
+                        print(legend)
+
+                # Monitor statistics
+                monitor_uptime = time.time() - monitor_start_time
+                print(f"Monitor uptime: {format_runtime(monitor_uptime)} | Updates: {update_count}")
                 print()
 
-            # Execution isolation info
-            if args.execution_id:
-                print(f"{colors['dim']}Tracking execution: {args.execution_id} | PID files: /tmp/task_pid_*_{args.execution_id}_*.txt{colors['reset']}")
+                # Enhanced status table with colors
+                table = PrettyTable()
+                table.field_names = ["Task Name", "Status", "Start Time", "End Time", "Runtime", "PID"]
+                table.align = "l"
+
+                for task in filtered_tasks:
+                    task_name = task['name']
+
+                    if task_name in running_tasks:
+                        # Currently running
+                        running_info = running_tasks[task_name]
+                        runtime_seconds = calculate_runtime(running_info['start_time'])
+                        status_display = create_status_display("running", colors)
+
+                        table.add_row([
+                            f"{colors['bold']}{task_name}{colors['reset']}",
+                            status_display,
+                            running_info['start_time'],
+                            "-",
+                            f"{colors['cyan']}{format_runtime(runtime_seconds)}{colors['reset']}",
+                            f"{colors['dim']}{running_info['pid']}{colors['reset']}"
+                        ])
+
+                    elif task_name in completed_tasks:
+                        # Completed
+                        completed_info = completed_tasks[task_name]
+                        runtime_seconds = calculate_runtime(completed_info['start_time'], completed_info['end_time'])
+
+                        # Get the actual status and format it properly
+                        actual_status = completed_info.get('status', 'completed')
+                        status_display = create_status_display(actual_status, colors)
+
+                        # Color the runtime based on status
+                        runtime_color = colors['green'] if actual_status.lower() == 'success' else colors['red'] if 'fail' in actual_status.lower() else colors['reset']
+
+                        table.add_row([
+                            task_name,
+                            status_display,
+                            completed_info['start_time'],
+                            completed_info['end_time'],
+                            f"{runtime_color}{format_runtime(runtime_seconds)}{colors['reset']}",
+                            "-"
+                        ])
+
+                    else:
+                        # Waiting
+                        status_display = create_status_display("waiting", colors)
+                        table.add_row([
+                            f"{colors['dim']}{task_name}{colors['reset']}",
+                            status_display,
+                            "-",
+                            "-",
+                            "-",
+                            "-"
+                        ])
+
+                print(table)
                 print()
 
-            # Update interval with resource-conservative refresh rates
-            refresh_interval = args.refresh_rate
+                # Currently running tasks summary
+                if running_count > 0:
+                    print(f"{colors['bold']}{colors['cyan']}Currently Running:{colors['reset']}")
+                    for task_name, running_info in running_tasks.items():
+                        if any(task['name'] == task_name for task in filtered_tasks):
+                            runtime_seconds = calculate_runtime(running_info['start_time'])
+                            print(f"  {colors['cyan']}{task_name}{colors['reset']} "
+                                  f"(PID: {colors['dim']}{running_info['pid']}{colors['reset']}) - "
+                                  f"{colors['cyan']}{format_runtime(runtime_seconds)}{colors['reset']}")
+                    print()
 
-            # Conservative refresh rates to reduce CPU usage
-            if running_count > 0:
-                refresh_interval = 2.0  # 2s when tasks are running (reduced from 0.5s)
-            elif success_count + failed_count < total_tasks:
-                refresh_interval = 3.0  # 3s when tasks are expected to start (reduced from 1s)
-            else:
-                refresh_interval = max(args.refresh_rate, 5.0)  # 5s when all done (increased from 2s)
+                # Summary statistics
+                if total_tasks > 0:
+                    completion_rate = (success_count + failed_count) / total_tasks * 100
+                    success_rate = success_count / (success_count + failed_count) * 100 if (success_count + failed_count) > 0 else 0
 
-            time.sleep(refresh_interval)
+                    stats_line = (f"Completion: {completion_rate:.1f}% | "
+                                 f"Success Rate: {success_rate:.1f}% | "
+                                 f"Total Tasks: {total_tasks}")
+                    print(f"{colors['dim']}{stats_line}{colors['reset']}")
+
+                # File status indicator
+                files_status = []
+                for file_path, label in [(args.flow, "Flow"), (args.completed, "Completed"), (args.runtime, "Runtime")]:
+                    try:
+                        if os.path.exists(file_path):
+                            mtime = os.path.getmtime(file_path)
+                            age = time.time() - mtime
+                            if age < 60:  # Less than 1 minute old
+                                files_status.append(f"{colors['green']}{label}+{colors['reset']}")
+                            else:
+                                files_status.append(f"{colors['dim']}{label}+{colors['reset']}")
+                        else:
+                            files_status.append(f"{colors['red']}{label}-{colors['reset']}")
+                    except Exception as e:
+                        files_status.append(f"{colors['red']}{label}?{colors['reset']}")
+
+                print(f"Files: {' '.join(files_status)}")
+
+                # Show execution context
+                context_info = []
+                if args.start:
+                    context_info.append(f"Start: {args.start}")
+                if args.end:
+                    context_info.append(f"End: {args.end}")
+                if args.only:
+                    context_info.append(f"Only: {args.only}")
+                if args.force:
+                    context_info.append("Force mode")
+
+                if context_info:
+                    print(f"{colors['dim']}Context: {' | '.join(context_info)}{colors['reset']}")
+                    print()
+
+                # Execution isolation info
+                if args.execution_id:
+                    print(f"{colors['dim']}Tracking execution: {args.execution_id} | PID files: /tmp/task_pid_*_{args.execution_id}_*.txt{colors['reset']}")
+                    print()
+
+            finally:
+                # Restore stdout and write buffered content all at once
+                sys.stdout = old_stdout
+                buffered_content = output_buffer.getvalue()
+                output_buffer.close()
+
+                # Clear screen and write all content in one operation
+                sys.stdout.write('\033[H\033[2J')  # Home + clear
+                sys.stdout.write(buffered_content)
+                sys.stdout.flush()
+
+                # Update interval with resource-conservative refresh rates
+                refresh_interval = args.refresh_rate
+
+                # Conservative refresh rates to reduce CPU usage
+                if running_count > 0:
+                    refresh_interval = 2.0  # 2s when tasks are running (reduced from 0.5s)
+                elif success_count + failed_count < total_tasks:
+                    refresh_interval = 3.0  # 3s when tasks are expected to start (reduced from 1s)
+                else:
+                    refresh_interval = max(args.refresh_rate, 5.0)  # 5s when all done (increased from 2s)
+
+                time.sleep(refresh_interval)
 
     except KeyboardInterrupt:
+        show_cursor()  # Restore cursor visibility
         clear_screen()
         print(f"{colors['bold']}{colors['yellow']}Task monitor stopped by user.{colors['reset']}")
         print(f"Monitor ran for {format_runtime(time.time() - monitor_start_time)} with {update_count} updates.")
@@ -713,9 +781,13 @@ def main():
             print(f"Final status: {final_completion:.1f}% completion, {success_count} successful, {failed_count} failed")
 
     except Exception as e:
+        show_cursor()  # Restore cursor visibility
         clear_screen()
         print(f"{colors['red']}Error in task monitor: {e}{colors['reset']}")
         print("Monitor terminated unexpectedly.")
+
+    finally:
+        show_cursor()  # Always restore cursor on exit
 
 if __name__ == "__main__":
     main()

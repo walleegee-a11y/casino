@@ -112,7 +112,7 @@ task_templates:
       # Keyword templates with placeholders - will be expanded for each mode/corner/metric/path_type
       # Setup timing - WNS
       - name: "{mode}_{corner}_s_wns_{path_type}"
-        group: "sta_timing"
+        group: "sta_setup_timing"
         pattern: "WNS\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
         type: "sta_timing_row"
         unit: "ns"
@@ -121,7 +121,7 @@ task_templates:
         timing_type: "setup"
       # Setup timing - TNS
       - name: "{mode}_{corner}_s_tns_{path_type}"
-        group: "sta_timing"
+        group: "sta_setup_timing"
         pattern: "TNS\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
         type: "sta_timing_row"
         unit: "ns"
@@ -130,7 +130,7 @@ task_templates:
         timing_type: "setup"
       # Setup timing - NUM
       - name: "{mode}_{corner}_s_num_{path_type}"
-        group: "sta_timing"
+        group: "sta_setup_timing"
         pattern: "NUM\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
         type: "sta_timing_row"
         unit: ""
@@ -139,7 +139,7 @@ task_templates:
         timing_type: "setup"
       # Hold timing - WNS
       - name: "{mode}_{corner}_h_wns_{path_type}"
-        group: "sta_timing"
+        group: "sta_hold_timing"
         pattern: "WNS\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
         type: "sta_timing_row"
         unit: "ns"
@@ -148,7 +148,7 @@ task_templates:
         timing_type: "hold"
       # Hold timing - TNS
       - name: "{mode}_{corner}_h_tns_{path_type}"
-        group: "sta_timing"
+        group: "sta_hold_timing"
         pattern: "TNS\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
         type: "sta_timing_row"
         unit: "ns"
@@ -157,7 +157,7 @@ task_templates:
         timing_type: "hold"
       # Hold timing - NUM
       - name: "{mode}_{corner}_h_num_{path_type}"
-        group: "sta_timing"
+        group: "sta_hold_timing"
         pattern: "NUM\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)\\s+([\\d.-]+)"
         type: "sta_timing_row"
         unit: ""
@@ -360,12 +360,6 @@ task_templates:
         pair_value: "cell flatten"
         unit: ""
         file_name: "01_DRC/DRC_RES.sum"
-      - name: "drc_rulechecks"
-        group: "pv_drc"
-        pattern: "TOTAL DRC RuleChecks Executed:\\s*(\\d+)"
-        type: "number"
-        unit: "ea"
-        file_name: "01_DRC/DRC_RES.sum"
       # Detailed per-rule DRC violations
       - name: "drc_detailed"
         group: "pv_drc"
@@ -376,18 +370,36 @@ task_templates:
         section_start: "--- RULECHECK RESULTS STATISTICS"
         section_end: "--- SUMMARY"
         skip_zero: true
-#      - name: "cpu_time"
-#        group: "pv_runtime"
-#        pattern: "TOTAL CPU Time:\\s*(\\d+)"
-#        type: "number"
-#        unit: "ea"
-#        file_name: "01_DRC/DRC_RES.sum"
-#      - name: "real_time"
-#        group: "pv_runtime"
-#        pattern: "TOTAL REAL Time:\\s*(\\d+)"
-#        type: "number"
-#        unit: "ea"
-#        file_name: "01_DRC/DRC_RES.sum"
+
+  # Template for Calibre PV PERC task
+  pv_calibre_perc_task: &pv_calibre_perc_task
+    description: "Calibre PERC Physical Verification"
+    log_files:
+      - "logs/perc_tp.log"
+      - "logs/perc_ldl.log"
+    report_files:
+      - "09_PERC/perc.rep"
+      - "09_PERC/perc.rep.ldl"
+    keywords:
+      - name: "perc_detailed"
+        group: "pv_perc"
+        pattern: "COMPLETED\\s+(?:(\\d+)\\s*\\((\\d+)\\))?\\s+(?:(\\d+)\\s*\\((\\d+)\\))?\\s+(\\S+)"
+        type: "perc_rulecheck_summary"
+        unit: ""
+        file_name: "09_PERC/perc.rep"
+        section_start: "                                      RULECHECK  SUMMARY"
+        section_end: "                                      PERC PARAMETERS"
+        skip_zero: true  # Ignore rules with "0 (0)" counts
+        skip_info: true  # Ignore rules starting with INFO_
+      - name: "perc_ldl_detailed"
+        group: "pv_perc_ldl"
+        pattern: "RULECHECK\\s+(\\S+)\\s+\\.+\\s+TOTAL Result Count\\s+=\\s+(\\d+)\\s*\\((\\d+)\\)"
+        type: "perc_rulecheck"
+        unit: ""
+        file_name: "09_PERC/perc.rep.ldl"
+        section_start: "=== DRC RULECHECK STATISTICS"
+        section_end: "=== DRC LAYER STATISTICS"
+        skip_zero: true  # Ignore rules with "0 (0)" counts
 
   # Template for Calibre PV LVS task
   pv_calibre_lvs_task: &pv_calibre_lvs_task
@@ -431,42 +443,6 @@ task_templates:
         section_end: "--- SUMMARY"
         skip_zero: true
 
-  # Template for Calibre PV PERC task
-  pv_calibre_perc_task: &pv_calibre_perc_task
-    description: "Calibre PERC Physical Verification"
-    log_files:
-      - "logs/perc_tp.log"
-      - "logs/perc_ldl.log"
-    report_files:
-      - "09_PERC/perc.rep"
-      - "09_PERC/perc.rep.ldl"
-    keywords:
-      # PERC report analysis - extracts from RULECHECK SUMMARY section (perc.rep)
-      # Matches both formats:
-      #   COMPLETED   7 (7)                       ESD.NET.1gu (...)
-      #   COMPLETED                 41 (41)       INFO_Power_Clamp (...)
-      - name: "perc"
-        group: "pv_perc"
-        pattern: "COMPLETED\\s+(?:(\\d+)\\s*\\((\\d+)\\))?\\s+(?:(\\d+)\\s*\\((\\d+)\\))?\\s+(\\S+)"
-        type: "perc_rulecheck_summary"
-        unit: ""
-        file_name: "09_PERC/perc.rep"
-        section_start: "                                      RULECHECK  SUMMARY"
-        section_end: "                                      PERC PARAMETERS"
-        skip_zero: true  # Ignore rules with "0 (0)" counts
-        skip_info: true  # Ignore rules starting with INFO_
-
-      # PERC LDL analysis - extracts non-zero rule violations from DRC RULECHECK STATISTICS section (perc.rep.ldl)
-      - name: "perc_ldl_violations"
-        group: "pv_perc"
-        pattern: "RULECHECK\\s+(\\S+)\\s+\\.+\\s+TOTAL Result Count\\s+=\\s+(\\d+)\\s*\\((\\d+)\\)"
-        type: "perc_rulecheck"
-        unit: ""
-        file_name: "09_PERC/perc.rep.ldl"
-        section_start: "=== DRC RULECHECK STATISTICS"
-        section_end: "=== DRC LAYER STATISTICS"
-        skip_zero: true  # Ignore rules with "0 (0)" counts
-
 
   # Template for standard APR tasks (place, cts, postcts, route, postroute, chipfinish)
   standard_apr_task: &standard_apr_task
@@ -476,86 +452,86 @@ task_templates:
     report_files:
       - "report/{task_name}/*.summary.gz"
     keywords:
-      - name: "error"
-        group: "err/warn"
+      - name: "apr_inn_error"
+        group: "apr_inn_err"
         pattern: "\\*\\*ERROR: "
         type: "count"
         unit: ""
         file_name: "logs/{task_name}.log"
-      - name: "warning"
-        group: "err/warn"
+      - name: "apr_inn_warning"
+        group: "apr_inn_warn"
         pattern: "\\*\\*WARN: "
         type: "count"
         unit: ""
         file_name: "logs/{task_name}.log"
-      - name: "hotspot"
-        group: "congestion"
+      - name: "apr_inn_hotspot"
+        group: "apr_inn_congestion"
         pattern: "\\[hotspot\\]\\s*\\|\\s*normalized\\s*\\|\\s*([\\d.]+)\\s*\\|\\s*([\\d.]+)\\s*\\|"
         type: "multiple_values"
         pair_value: "Max Total"
         unit: ""
         file_name: "logs/{task_name}.log"
-      - name: "s_wns"
-        group: "timing"
+      - name: "apr_inn_s_wns"
+        group: "apr_inn_setup_timing"
         pattern: "\\|\\s+WNS \\(ns\\):\\s*\\|(.+?)\\|\\s*$"
         type: "dynamic_table_row"
         unit: "ns"
         file_name: "report/{task_name}/{task_name}.summary.gz"
         header_pattern: "\\|\\s+Setup mode\\s+\\|(.+?)\\|\\s*$"
-      - name: "s_tns"
-        group: "timing"
+      - name: "apr_inn_s_tns"
+        group: "apr_inn_setup_timing"
         pattern: "\\|\\s+TNS \\(ns\\):\\s*\\|(.+?)\\|\\s*$"
         type: "dynamic_table_row"
         unit: "ns"
         file_name: "report/{task_name}/{task_name}.summary.gz"
         header_pattern: "\\|\\s+Setup mode\\s+\\|(.+?)\\|\\s*$"
-      - name: "s_nov"
-        group: "timing"
+      - name: "apr_inn_s_nov"
+        group: "apr_inn_setup_timing"
         pattern: "\\|\\s+Violating Paths:\\s*\\|(.+?)\\|\\s*$"
         type: "dynamic_table_row"
         unit: ""
         file_name: "report/{task_name}/{task_name}.summary.gz"
         header_pattern: "\\|\\s+Setup mode\\s+\\|(.+?)\\|\\s*$"
-      - name: "h_wns"
-        group: "timing"
+      - name: "apr_inn_h_wns"
+        group: "apr_inn_hold_timing"
         pattern: "\\|\\s+WNS \\(ns\\):\\s*\\|(.+?)\\|\\s*$"
         type: "dynamic_table_row"
         unit: "ns"
         file_name: "report/{task_name}/{task_name}_hold_hold.summary.gz"
         header_pattern: "\\|\\s+Hold mode\\s+\\|(.+?)\\|\\s*$"
-      - name: "h_tns"
-        group: "timing"
+      - name: "apr_inn_h_tns"
+        group: "apr_inn_hold_timing"
         pattern: "\\|\\s+TNS \\(ns\\):\\s*\\|(.+?)\\|\\s*$"
         type: "dynamic_table_row"
         unit: "ns"
         file_name: "report/{task_name}/{task_name}_hold_hold.summary.gz"
         header_pattern: "\\|\\s+Hold mode\\s+\\|(.+?)\\|\\s*$"
-      - name: "h_nov"
-        group: "timing"
+      - name: "apr_inn_h_nov"
+        group: "apr_inn_hold_timing"
         pattern: "\\|\\s+Violating Paths:\\s*\\|(.+?)\\|\\s*$"
         type: "dynamic_table_row"
         unit: ""
         file_name: "report/{task_name}/{task_name}_hold_hold.summary.gz"
         header_pattern: "\\|\\s+Hold mode\\s+\\|(.+?)\\|\\s*$"
-      - name: "overflow"
-        group: "congestion"
+      - name: "apr_inn_overflow"
+        group: "apr_inn_congestion"
         pattern: "Routing Overflow:?\\s*([\\d.]+)%\\s*H\\s*and\\s*([\\d.]+)%\\s*V"
         type: "multiple_values"
         pair_value: "H V"
         unit: "%"
         file_name: "logs/{task_name}.log"
-      - name: "utilization"
-        group: "utilization"
+      - name: "apr_inn_utilization"
+        group: "apr_inn_utilization"
         pattern: "Density:\\s*([\\d.]+)%"
         type: "number"
         unit: "%"
         file_name: "logs/{task_name}.log"
-      - name: "cell_count"
+      - name: "apr_inn_cell_count"
         pattern: "# Instances:\\s*(\\d+)"
         type: "number"
         unit: ""
         file_name: "report/{task_name}/{task_name}_EU_TU"
-      - name: "area"
+      - name: "apr_inn_area"
         pattern: "Total area of Standard cells\\(Subtracting Physical Cells\\):\\s*([\\d.]+)"
         type: "number"
         unit: " um^2"
@@ -594,13 +570,13 @@ task_mappings:
         - "report/init/init.summary.gz"
       keywords:
         # Only error/warning for init_inn (no timing)
-        - name: "error"
+        - name: "apr_inn_error"
           file_name: "logs/init.log"
-        - name: "warning"
+        - name: "apr_inn_warning"
           file_name: "logs/init.log"
-        - name: "cell_count"
+        - name: "apr_inn_cell_count"
           file_name: "report/init.rpt"
-        - name: "area"
+        - name: "apr_inn_area"
           file_name: "report/init.rpt"
 
   sta_pt:

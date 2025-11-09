@@ -147,6 +147,11 @@ if args.only and (args.start or args.end):
 if args.interactive and not args.singleTerm:
     raise ValueError("The --interactive option can only be used with -singleTerm.")
 
+# Auto-enable interactive mode when singleTerm is used
+if args.singleTerm and not args.interactive:
+    print("Auto-enabling --interactive mode for -singleTerm execution")
+    args.interactive = True
+
 # Determine the filename suffix based on the arguments
 if args.only:
     filename_suffix = args.only
@@ -422,7 +427,15 @@ def create_terminal_command(terminal_type, title, command_args, **kwargs):
 
 
     elif terminal_type == TerminalType.GNOME_TERMINAL:
-        cmd = ['gnome-terminal', '--title', title]
+        # Get current group name to preserve gid inheritance
+        import grp
+        current_gid = os.getgid()
+        try:
+            group_name = grp.getgrgid(current_gid).gr_name
+        except:
+            group_name = None
+
+        cmd = ['gnome-terminal', '--wait', '--title', title]
 
         # Add gnome-terminal specific options
         if kwargs.get('geometry'):
@@ -453,7 +466,7 @@ def create_terminal_command(terminal_type, title, command_args, **kwargs):
             fg_hex = color_map.get(fg_color, fg_color) if fg_color else None
 
             # Create a wrapper script that sets colors then runs the command
-            color_script = f"""#!/usr/bin/csh -f
+            color_script = f"""#!/usr/bin/csh
 # Set terminal colors using escape sequences
 """
             if bg_hex:
@@ -468,7 +481,6 @@ exec {' '.join(command_args)}
 
             # Write the color script to a temporary file
             import tempfile
-            import os
 
             script_fd, script_path = tempfile.mkstemp(suffix='.csh', prefix='casino_color_')
             try:
@@ -476,20 +488,29 @@ exec {' '.join(command_args)}
                     f.write(color_script)
                 os.chmod(script_path, 0o755)
 
-                # Use the color script instead of direct command
-                cmd.extend(['--', 'csh', '-f', script_path])
+                # Wrap with sg to preserve gid if group_name is available
+                if group_name:
+                    cmd.extend(['--', 'sg', group_name, '-c', f'csh {script_path}'])
+                else:
+                    cmd.extend(['--', 'csh', script_path])
                 return cmd
 
             except Exception as e:
                 print(f"Error creating color script: {e}")
                 # Fallback to normal command without colors
-                cmd.append('--')
-                cmd.extend(command_args)
+                if group_name:
+                    cmd.extend(['--', 'sg', group_name, '-c', ' '.join(command_args)])
+                else:
+                    cmd.append('--')
+                    cmd.extend(command_args)
                 return cmd
         else:
-            # No colors specified, use normal command
-            cmd.append('--')
-            cmd.extend(command_args)
+            # No colors specified, use normal command wrapped with sg to preserve gid
+            if group_name:
+                cmd.extend(['--', 'sg', group_name, '-c', ' '.join(command_args)])
+            else:
+                cmd.append('--')
+                cmd.extend(command_args)
             return cmd
 
     else:
@@ -637,7 +658,7 @@ def save_completed_task_immediately(task_runtime_info):
     except Exception as e:
         print(f"Warning: Could not save task completion immediately: {e}")
 
-def monitor_process_and_status(self, process, status_file, pid_file, task_name, max_wait_time=86400):
+def monitor_process_and_status(self, process, status_file, pid_file, task_name, max_wait_time=864000):
     """
     Enhanced monitoring that detects both normal completion AND accidental terminal closure
     """
@@ -851,7 +872,7 @@ def execute_task(task):
 
         # Create enhanced C shell script with status tracking
         auto_flag = "1" if args.y else "0"
-        script_content = f"""#!/usr/bin/csh -f
+        script_content = f"""#!/usr/bin/csh
 # Write PID for monitoring
 echo $$ > {pid_file}
 
@@ -937,7 +958,7 @@ exit $exit_code
 
         # Create terminal command for task execution
         task_title = f"Task: {task['name']} [{task_id}] @ {run_dir}"
-        task_cmd_args = ['/usr/bin/csh', '-f', script_path]
+        task_cmd_args = ['/usr/bin/csh', script_path]
 
         terminal_cmd = create_terminal_command(
             selected_terminal,
@@ -950,7 +971,7 @@ exit $exit_code
 
         # Create terminal command for task execution
         task_title = f"Task: {task['name']} [{task_id}] @ {run_dir}"
-        task_cmd_args = ['/usr/bin/csh', '-f', script_path]
+        task_cmd_args = ['/usr/bin/csh', script_path]
 
         # Determine colors based on task name for gnome-terminal
         if selected_terminal == TerminalType.XTERM:
@@ -986,7 +1007,7 @@ exit $exit_code
 
         # Use Option 1: Process tree monitoring
         status = monitor_with_process_tree_csh(
-            process, status_file, pid_file, task['name'], max_wait_time=86400
+            process, status_file, pid_file, task['name'], max_wait_time=864000
         )
 
         current_process = None
@@ -1056,7 +1077,7 @@ exit $exit_code
 
     return start_time_str, end_time_str, runtime, status
 
-def monitor_with_process_tree_csh(process, status_file, pid_file, task_name, max_wait_time=86400):
+def monitor_with_process_tree_csh(process, status_file, pid_file, task_name, max_wait_time=864000):
     """Monitor both status file and csh process health with FAST terminal death detection"""
     global interrupted
     wait_start = time.time()
@@ -1359,7 +1380,7 @@ def display_previous_runs_summary():
 ########
 
 
-def monitor_process_and_status(process, status_file, pid_file, task_name, max_wait_time=86400):
+def monitor_process_and_status(process, status_file, pid_file, task_name, max_wait_time=864000):
     """
     Enhanced monitoring that detects both normal completion AND accidental terminal closure
     """
@@ -1578,7 +1599,7 @@ def execute_task_single_terminal(task):
 
         # Create enhanced C shell script with status tracking for single terminal
         auto_flag = "1" if args.y else "0"
-        script_content = f"""#!/usr/bin/csh -f
+        script_content = f"""#!/usr/bin/csh
 # Write PID for monitoring
 echo $$ > {pid_file}
 
@@ -1628,13 +1649,13 @@ exit $exit_code
         if args.interactive:
             # Interactive mode: inherit stdin/stdout/stderr for real-time interaction
             process = subprocess.Popen(
-                ['/usr/bin/csh', '-f', script_path],
+                ['/usr/bin/csh', script_path],
                 env=os.environ.copy()
             )
         else:
             # Non-interactive mode: capture output for monitoring
             process = subprocess.Popen(
-                ['/usr/bin/csh', '-f', script_path],
+                ['/usr/bin/csh', script_path],
                 env=os.environ.copy(),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1645,7 +1666,7 @@ exit $exit_code
         current_process = process
 
         # Monitor the process and status file
-        max_wait_time = 86400  # 1 hour maximum wait
+        max_wait_time = 864000  # 1 hour maximum wait
         wait_start = time.time()
 
         if args.interactive:

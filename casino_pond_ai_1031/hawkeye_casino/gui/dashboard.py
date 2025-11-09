@@ -34,6 +34,7 @@ from ..core.config import get_all_configured_jobs_and_tasks
 from ..core.keyword_groups import (
     load_yaml_config, group_keywords_by_yaml, extract_all_groups_from_yaml
 )
+from ..core.report_table import ReportTableWidget
 from .workers import BackgroundWorker
 
 try:
@@ -45,7 +46,7 @@ try:
         QScrollArea, QStatusBar, QHeaderView, QDialog,
         QCheckBox, QDialogButtonBox, QMenu, QProgressBar,
         QStyledItemDelegate, QLineEdit, QCompleter,
-        QStyleOptionViewItem, QStyle, QApplication  # ADD THESE
+        QStyleOptionViewItem, QStyle, QApplication, QStackedWidget
 
     )
     from PyQt5.QtCore import Qt, QThread, pyqtSignal, QSize, QStringListModel
@@ -265,6 +266,10 @@ if GUI_AVAILABLE:
             # View mode (task/job/both)
             self.view_mode = "Task View"  # Default to Task View
             self.current_selected_analysis = None  # Track current selection for view mode switching
+
+            # Table view mode (horizontal/report)
+            self.table_view_mode = "Horizontal View"  # Default to Horizontal View
+            self.report_table_widget = None  # Will be created in create_widgets
 
             # Keyword grouping (from YAML configuration)
             self.yaml_config = None  # Store YAML configuration
@@ -796,7 +801,7 @@ if GUI_AVAILABLE:
                     box-shadow: 0 2px 4px rgba(0,0,0,0.15);
                 }}
                 QPushButton::menu-indicator {{
-                    width: 0px;  /* Hide default arrow since we have ▼ in text */
+                    width: 0px;  /* Hide default arrow since we have ? in text */
                 }}
             """)
             button_layout.addWidget(export_btn)
@@ -916,6 +921,29 @@ if GUI_AVAILABLE:
                 }}
             """)
             button_layout.addWidget(self.view_mode_combo)
+
+            # Table View Mode toggle button
+            self.table_view_toggle_btn = QPushButton("Report View")
+            self.table_view_toggle_btn.clicked.connect(self.toggle_table_view_mode)
+            self.table_view_toggle_btn.setToolTip(
+                "Toggle between Horizontal View (default) and Report View\n"
+                "Report View: Groups keywords vertically for easier reading"
+            )
+            self.table_view_toggle_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.INFO_CYAN};
+                    color: black;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #009ED5;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
+            button_layout.addWidget(self.table_view_toggle_btn)
 
             # ADD THIS: Keyword Column Width button
             self.keyword_width_btn = QPushButton("Keyword Width: 80px")
@@ -1151,6 +1179,7 @@ if GUI_AVAILABLE:
             self.table.setIndentation(0)  # No indentation for hierarchy
 
             self.table.itemDoubleClicked.connect(self.on_item_double_click)
+            self.table.itemSelectionChanged.connect(self._on_table_selection_changed)
             self.table.setColumnWidth(Columns.BASE_DIR, 100)
             self.table.setColumnWidth(Columns.TOP_NAME, 100)
             self.table.setColumnWidth(Columns.USER, 100)
@@ -1306,7 +1335,21 @@ if GUI_AVAILABLE:
             self.table.setFocusPolicy(Qt.StrongFocus)
             self.table.setFocus()
 
-            main_layout.addWidget(self.table)
+            # Create stacked widget to hold both table views
+            self.table_view_stack = QStackedWidget()
+
+            # Add horizontal table view (index 0)
+            self.table_view_stack.addWidget(self.table)
+
+            # Create and add report table view (index 1)
+            self.report_table_widget = ReportTableWidget()
+            self.report_table_widget.set_keyword_groups(self.keyword_groups)
+            self.table_view_stack.addWidget(self.report_table_widget)
+
+            # Set default view (Horizontal)
+            self.table_view_stack.setCurrentIndex(0)
+
+            main_layout.addWidget(self.table_view_stack)
 
             # Progress bar
             self.progress_bar = QProgressBar()
@@ -3190,6 +3233,101 @@ if GUI_AVAILABLE:
                         f"View mode: {mode}. Note: Job aggregation requires analyzed data. "
                         f"Use 'Gather Selected' first."
                     )
+
+        def toggle_table_view_mode(self):
+            """Toggle between Horizontal View and Report View"""
+            if self.table_view_mode == "Horizontal View":
+                # Switch to Report View
+                self.table_view_mode = "Report View"
+                self.table_view_stack.setCurrentIndex(1)  # Show report table
+                self.table_view_toggle_btn.setText("Horizontal View")
+                self.status_bar.showMessage("Switched to Report View (grouped vertical layout)")
+                debug_print("Switched to Report View", "UI")
+
+                # Update report table with current selection if available
+                self._update_report_table_from_selection()
+
+            else:
+                # Switch to Horizontal View
+                self.table_view_mode = "Horizontal View"
+                self.table_view_stack.setCurrentIndex(0)  # Show horizontal table
+                self.table_view_toggle_btn.setText("Report View")
+                self.status_bar.showMessage("Switched to Horizontal View (default keyword columns)")
+                debug_print("Switched to Horizontal View", "UI")
+
+        def _on_table_selection_changed(self):
+            """Handle table selection changes - update report view if active"""
+            if self.table_view_mode == "Report View":
+                # Only update report table if we're currently in report view
+                self._update_report_table_from_selection()
+
+        def _update_report_table_from_selection(self):
+            """Update report table widget with currently selected run data"""
+            # Get selected items
+            selected_items = self.table.selectedItems()
+            if not selected_items:
+                return
+
+            # Get all unique selected rows
+            selected_rows = []
+            seen_items = []
+            for item in selected_items:
+                if item.parent() is None:
+                    if item not in seen_items:  # ? Uses identity comparison
+                        selected_rows.append(item)
+                        seen_items.append(item)
+
+            if not selected_rows:
+                # Fallback: just use first item
+                selected_rows.add(selected_items[0])
+
+            selected_rows = list(selected_rows)
+            debug_print(f"Report view: Loading {len(selected_rows)} selected tasks", "UI")
+
+            # Collect task data from all selected rows
+            combined_tasks = []
+            for item in selected_rows:
+                run_path = item.data(0, Qt.UserRole)
+                job_name = item.data(0, Qt.UserRole + 1)
+                task_name = item.data(0, Qt.UserRole + 2)
+
+                if not run_path or not job_name or not task_name:
+                    continue
+
+                # Get task data from runs_data
+                if run_path in self.runs_data:
+                    run_data = self.runs_data[run_path]
+                    if 'jobs' in run_data and job_name in run_data['jobs']:
+                        job_data = run_data['jobs'][job_name]
+                        if 'tasks' in job_data and task_name in job_data['tasks']:
+                            task_data = job_data['tasks'][task_name]
+                            combined_tasks.append({
+                                'run_path': run_path,
+                                'job_name': job_name,
+                                'task_name': task_name,
+                                'task_data': task_data
+                            })
+
+            if not combined_tasks:
+                debug_print("No valid tasks found in selection", "UI")
+                return
+
+            # Update report table with combined data
+            headers = self.generate_dynamic_headers()
+            if len(combined_tasks) == 1:
+                # Single task - use original method
+                task_info = combined_tasks[0]
+                self.report_table_widget.set_run_data(
+                    task_info['run_path'],
+                    task_info['task_name'],
+                    task_info['task_data'],
+                    headers
+                )
+            else:
+                # Multiple tasks - use new combined method
+                self.report_table_widget.set_combined_run_data(combined_tasks, headers)
+
+            debug_print(f"Report view updated successfully with {len(combined_tasks)} tasks", "UI")
 
         def rebuild_table_with_view_mode(self, selected_analysis=None):
             """Rebuild table to show current view mode (Task/Job/Both)
@@ -6381,4 +6519,3 @@ if GUI_AVAILABLE:
 
 else:
     HawkeyeDashboard = None
-
