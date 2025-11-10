@@ -476,9 +476,9 @@ class ReportTableWidget(QWidget):
     def _update_toggle_button_text(self):
         """Update toggle button text based on current mode"""
         if self.comparison_mode == "side-by-side":
-            self.view_mode_btn.setText("Switch to Pivot View")
-        else:
             self.view_mode_btn.setText("Switch to Side-by-Side View")
+        else:
+            self.view_mode_btn.setText("Switch to Pivot View")
 
     def _update_categories_for_task(self, task_name: str):
         """Update category dropdown based on single task type - dynamically from YAML groups"""
@@ -663,8 +663,7 @@ class ReportTableWidget(QWidget):
                      self.cell_usage_table, self.pv_drc_table, self.pv_lvs_table,
                      self.pv_flipchip_table, self.pv_perc_table,
                      self.apr_timing_table, self.apr_congestion_table]:
-            if self.splitter.indexOf(table) >= 0:
-                self.splitter.widget(self.splitter.indexOf(table)).setVisible(False)
+            table.setVisible(False)
 
         # Handle "All Metrics" specially - only show tables with data
         if category == "All Metrics":
@@ -896,18 +895,27 @@ class ReportTableWidget(QWidget):
                     self._set_value_item(table, row_idx, col_idx, value)
 
         elif isinstance(sample_parsed, (VTHKeyword, CellUsageKeyword, GenericKeyword)):
-            # Simple keywords: Metric | Run1 | Run2...
-            headers = ["Metric"] + run_names
+            # Simple keywords: Cell Type | Metric | Run1 | Run2...
+            headers = ["Cell Type", "Metric"] + run_names
             table.setColumnCount(len(headers))
             table.setHorizontalHeaderLabels(headers)
 
             table.setRowCount(len(parsed_rows))
             for row_idx, row_data in enumerate(parsed_rows):
                 kw = row_data['parsed']
-                table.setItem(row_idx, 0, NaturalSortTableItem(kw.name))
+                # Split metric name into cell type and metric (e.g., "pad_inst" -> "pad", "inst")
+                parts = kw.name.rsplit('_', 1)
+                if len(parts) == 2:
+                    cell_type, metric = parts
+                else:
+                    # If no underscore, put everything in cell type, empty metric
+                    cell_type, metric = parts[0], ""
 
-                # Add run values
-                for col_idx, run_name in enumerate(run_names, start=1):
+                table.setItem(row_idx, 0, NaturalSortTableItem(cell_type))
+                table.setItem(row_idx, 1, NaturalSortTableItem(metric))
+
+                # Add run values (starting at column 2 now)
+                for col_idx, run_name in enumerate(run_names, start=2):
                     value = row_data['run_values'][run_name]
                     self._set_value_item(table, row_idx, col_idx, value)
 
