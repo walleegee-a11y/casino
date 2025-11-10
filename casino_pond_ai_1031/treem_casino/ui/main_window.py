@@ -914,10 +914,22 @@ class MainWindow(QMainWindow):
 
         from ..ui.dialogs import CloneDialog
         dialog = CloneDialog(self.config, selected_dir, self.directory_service, self)
-        if dialog.exec_() == dialog.Accepted:
+
+        # Show as non-modal (modeless) to allow interaction with main tree
+        dialog.setWindowFlags(dialog.windowFlags() | Qt.Window)
+        dialog.setAttribute(Qt.WA_DeleteOnClose)
+
+        # Connect finish signal to handle completion
+        dialog.finished.connect(lambda result: self._on_clone_finished(result, dialog))
+
+        dialog.show()  # Use show() instead of exec_() for non-modal
+
+    def _on_clone_finished(self, result, dialog):
+        """Handle clone dialog completion."""
+        if result == dialog.Accepted:
             dest_name = dialog.new_dir_name_input.text().strip()
             if dest_name:
-                source_path = Path(selected_dir)
+                source_path = Path(dialog.dir_path)  # Use dialog's dir_path which may have changed
                 dest_path = source_path.parent / dest_name
                 self.history_service.add_clone_operation(source_path, dest_path)
             QTimer.singleShot(500, self.refresh_directory_tree)
@@ -1312,4 +1324,3 @@ class MainWindow(QMainWindow):
                 self.updated_dirs_widget.clear_updates()
         else:
             super().keyPressEvent(event)
-

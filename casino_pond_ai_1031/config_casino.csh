@@ -7,7 +7,7 @@ unsetenv casino_*
 setenv casino_prj_base                 "/mnt/data/prjs"
 setenv casino_prj_name                 "ANA6716"
 setenv casino_design_ver               "net-2.2"
-setenv casino_dk_ver                   "dk-2.4"
+setenv casino_dk_ver                   "dk-2.5"
 setenv casino_tag                      "tag-0.0"
 setenv casino_is_top                   "1"
 setenv casino_top_name                 "ANA6716"

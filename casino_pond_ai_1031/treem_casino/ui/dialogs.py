@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTreeWidget,
     QTreeWidgetItem, QPushButton, QProgressBar, QRadioButton, QWidget, QMessageBox
 )
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QFont
 
 from ..config.settings import AppConfig
@@ -40,20 +40,40 @@ class CloneDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        # Base directory label
-        self.base_dir_label = QLabel("Selected Base Directory to Clone:\n" + self.dir_path)
+        # Base directory label with change source button
+        dir_label_layout = QHBoxLayout()
+
+        self.base_dir_label = QLabel("Source Directory to Clone:\n" + self.dir_path)
         self.base_dir_label.setWordWrap(True)
         self.base_dir_label.setFont(font)
         self.base_dir_label.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        layout.addWidget(self.base_dir_label)
+        dir_label_layout.addWidget(self.base_dir_label)
 
-        # New directory name input
-        label_new_dir_name = QLabel("New Directory Name for Cloned Items:")
+        change_source_button = QPushButton("Change Source...")
+        change_source_button.setFont(font)
+        change_source_button.clicked.connect(self.change_source_directory)
+        change_source_button.setMaximumWidth(150)
+        change_source_button.setToolTip("Click a directory in the main tree window first, then click this button")
+        dir_label_layout.addWidget(change_source_button)
+
+        layout.addLayout(dir_label_layout)
+
+        # Add instruction label
+        instruction_label = QLabel("Tip: Select a directory in the main tree, then click 'Change Source...' to use it")
+        instruction_label.setFont(QFont("Terminus", 9))
+        instruction_label.setStyleSheet("color: #666; font-style: italic; padding: 2px;")
+        instruction_label.setWordWrap(True)
+        layout.addWidget(instruction_label)
+
+        # New directory name input (white background to highlight as required)
+        label_new_dir_name = QLabel("New Directory Name for Cloned Items: (Required)")
         label_new_dir_name.setFont(font)
         layout.addWidget(label_new_dir_name)
 
         self.new_dir_name_input = QLineEdit()
         self.new_dir_name_input.setFont(font)
+        self.new_dir_name_input.setStyleSheet("background-color: white; color: black;")
+        self.new_dir_name_input.setPlaceholderText("Enter destination directory name...")
         layout.addWidget(self.new_dir_name_input)
 
         # Select items label
@@ -94,7 +114,7 @@ class CloneDialog(QDialog):
         # Connect signals
         self.tree_widget.itemDoubleClicked.connect(self.handle_item_double_clicked)
         self.tree_widget.itemChanged.connect(self.handle_item_checked)
-        self.tree_widget.itemExpanded.connect(self.handle_item_expanded)  # ADD THIS LINE
+        self.tree_widget.itemExpanded.connect(self.handle_item_expanded)
         self.tree_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.tree_widget.customContextMenuRequested.connect(self.show_context_menu)
 
@@ -159,6 +179,66 @@ class CloneDialog(QDialog):
         # Adjust column widths proportionally
         width = self.tree_widget.viewport().width()
         self.tree_widget.setColumnWidth(0, int(width * 0.65))  # 65% for Name column
+
+    def change_source_directory(self):
+        """Change the source directory by getting selection from parent tree manager."""
+        # Try to get selected directory from parent tree manager immediately
+        if self.parent() and hasattr(self.parent(), 'get_selected_directory'):
+            new_dir = self.parent().get_selected_directory()
+            if new_dir and os.path.isdir(new_dir):
+                if new_dir != self.dir_path:
+                    # Update the source directory
+                    self.dir_path = new_dir
+                    self.base_dir_label.setText("Source Directory to Clone:\n" + self.dir_path)
+
+                    # Clear and repopulate tree with new directory
+                    self.tree_widget.clear()
+                    self.selected_items.clear()
+                    self.populate_tree_original()
+                    self.update_selected_items_label()
+
+                    # Show brief success message
+                    self.base_dir_label.setStyleSheet("background-color: #90EE90; padding: 5px;")
+                    QTimer.singleShot(2000, lambda: self.base_dir_label.setStyleSheet(""))
+                else:
+                    QMessageBox.information(self, "No Change", "Selected directory is the same as current source.")
+            else:
+                # No valid selection - offer file dialog
+                reply = QMessageBox.question(
+                    self,
+                    "No Selection",
+                    "No directory selected in tree manager.\n\nWould you like to browse for a directory instead?",
+                    QMessageBox.Yes | QMessageBox.No
+                )
+                if reply == QMessageBox.Yes:
+                    from PyQt5.QtWidgets import QFileDialog
+                    new_dir = QFileDialog.getExistingDirectory(
+                        self, "Select Source Directory", self.dir_path
+                    )
+                    if new_dir:
+                        self.dir_path = new_dir
+                        self.base_dir_label.setText("Source Directory to Clone:\n" + self.dir_path)
+
+                        # Clear and repopulate tree with new directory
+                        self.tree_widget.clear()
+                        self.selected_items.clear()
+                        self.populate_tree_original()
+                        self.update_selected_items_label()
+        else:
+            # Fallback: use standard directory browser
+            from PyQt5.QtWidgets import QFileDialog
+            new_dir = QFileDialog.getExistingDirectory(
+                self, "Select Source Directory", self.dir_path
+            )
+            if new_dir:
+                self.dir_path = new_dir
+                self.base_dir_label.setText("Source Directory to Clone:\n" + self.dir_path)
+
+                # Clear and repopulate tree with new directory
+                self.tree_widget.clear()
+                self.selected_items.clear()
+                self.populate_tree_original()
+                self.update_selected_items_label()
 
     def populate_tree_original(self):
         """Original tree population logic from the attached code."""
@@ -556,4 +636,3 @@ class CloneDialog(QDialog):
         except Exception as e:
             print(f"Error copying directory contents from {src_dir} to {dest_dir}: {e}")
             raise
-

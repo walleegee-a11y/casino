@@ -20,7 +20,8 @@ set setup_corner [lindex [split ${corner} _] 4]
 set pvt_corner ${p_corner}_${v_corner}_${t_corner}
 
 if { ${setup_corner} != "" } {
-    set spef_cond  ${t_corner}_${rc_corner}_${setup_corner}
+    #set spef_cond  ${t_corner}_${rc_corner}_${setup_corner}
+    set spef_cond  ${t_corner}_${rc_corner}
 } else {
     set spef_cond  ${t_corner}_${rc_corner}
 }
@@ -489,6 +490,9 @@ if { ${pre_post} == "post" } {
 	report_global_timing -pba_mode $ovars(sta_pt,pba) -delay_type min -separate_all_groups > ./reports/global_timing.all_grps.$ovars(sta_pt,pba).min.rpt
 
 }
+
+#- MTTV waive(25.11.05)
+source -e -v /mnt/data/prjs/ANA6716/works_rachel.han/script/waive.tcl
 
 sh touch REPORT_DONE
 

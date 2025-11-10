@@ -1014,3 +1014,4 @@ function exportComparison() {
     const viewType = isTransposed ? 'Transposed view' : 'Normal view';
     alert(`Exported ${visibleKeywords.length} keywords from ${visibleRuns.length} runs in ${viewType} format.\n\nFilename: ${filename}\n\nThe TSV matches exactly what you see in the table with tab separators.`);
 }
+

@@ -510,12 +510,12 @@ def notify_run_creation(run_path, run_version, tree_manager_history_service=None
                 operation="create_run",
                 details=f"Created run directory: {run_version}"
             )
-            print(f"\n✓ Run creation added to Tree Manager history")
+            print(f"\n? Run creation added to Tree Manager history")
             print(f"  - Run: {run_version}")
             print(f"  - Path: {run_path}")
             print(f"  - Check Recent area in Tree Manager for the 'Run' button\n")
         except Exception as e:
-            print(f"\n⚠ Warning: Could not update Tree Manager history: {e}\n")
+            print(f"\n? Warning: Could not update Tree Manager history: {e}\n")
 
 def write_casino_env_vars(env_vars, runs_path):
     """
@@ -688,20 +688,20 @@ def main():
         )
 
         if success:
-            print(f"✓ {message}")
+            print(f"? {message}")
             print(f"  - Run path: {full_run_path}")
             print(f"  - Run version: {env_vars['casino_run_ver']}")
             print(f"  - User: {env_vars['casino_whoami']}")
             print(f"  - This will appear as a 'Run' button in Tree Manager's Recent area")
         else:
-            print(f"⚠ Warning: {message}")
+            print(f"? Warning: {message}")
 
     except ImportError as e:
-        print(f"⚠ Warning: history_utils.py not found - skipping history update")
+        print(f"? Warning: history_utils.py not found - skipping history update")
         print(f"  Error: {e}")
         print(f"  Note: History tracking is optional and won't affect run creation")
     except Exception as e:
-        print(f"⚠ Warning: Could not update directory history: {e}")
+        print(f"? Warning: Could not update directory history: {e}")
         print(f"  Note: This is non-fatal - run creation was successful")
         import traceback
         traceback.print_exc()
@@ -711,3 +711,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

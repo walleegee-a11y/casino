@@ -1255,3 +1255,4 @@ class FileAnalyzer:
 
         return found_files, errors
 
+

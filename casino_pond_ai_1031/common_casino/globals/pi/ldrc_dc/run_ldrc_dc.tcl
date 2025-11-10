@@ -49,47 +49,68 @@ foreach lib $io_ip_list {
 # TODO: flatten LDRC
 if { ${pre_post} == "pre" } {
 
-	# RTL
-	# TODO: syn run_ver?
-	if { [regexp rtl- ${design_ver}] } {
-				set netlist ${RUN_PATH}/syn_dc/results/${top_design}_syn.v
-		} else {
-			echo "ERROR : The netlist for performing LDRC is parsed based on $\{run_ver\}"
-			echo "        $\{run_ver\} should indicate whether the synthesis was done with \"dc\" or \"dcg\"."
-			echo "        ex) 01_dc_for-gen-def"
-			echo "        ex) 02_dcg_def-v01"
-			sh touch :ABNORMAL_ERROR_PRE_NETLIST-need2chk_run_ver
-	#		exit
+    sh mkdir -p logs
 
-	# TODO: netlist name?
-	} 
-	if { [regexp net- ${design_ver}] } {
-		set netlist ${DB_PATH}/vers/${db_ver}/design/v/${top_design}.v
-
-	} else {
-        echo "ERROR : need2chk $\{design_ver\}"
-        sh touch :ABNORMAL_ERROR_PRE_NETLIST-need2chk_design_ver
-   #     exit
-
+    # RTL
+    if { [regexp rtl- ${design_ver}] } {
+        lappend NETLIST ${RUN_PATH}/syn_dc/results/${top_design}_syn.v
     }
 
+    # NET
+    if { [regexp net- ${design_ver}] } {
+        set NETLIST ${DB_PATH}/vers/${db_ver}/design/v/${top_design}.v
+
+        if { $ovars(sta_pt,is_flatten) == 1 } {
+            set netlist [list \
+                $ovars(lec_fm,reference,top_net) \
+                $ovars(lec_fm,reference,sub_net_1) \
+                $ovars(lec_fm,reference,sub_net_2) \
+            ]
+            foreach each_netlist $netlist {
+                echo "read_verilog -netlist ${netlist}"
+                read_verilog -netlist ${each_netlist}
+            }
+        } else {
+            echo "read_verilog -netlist ${NETLIST}"
+            read_verilog -netlist ${NETLIST}
+        }
+
+    } else {
+        echo "ERROR : need2chk ${design_ver}"
+        sh touch :ABNORMAL_ERROR_PRE_NETLIST-need2chk_design_ver
+        sh chmod +s :ABNORMAL_ERROR_PRE_NETLIST-need2chk_design_ver
+        exit 1
+    }
+
+    current_design ${top_design}
+    link > logs/link.log
+
 } elseif { ${pre_post} == "post" } {
-    set netlist ${PD_OUT_PATH}/netlist/${top_design}.v
+
+    sh mkdir -p logs
+
+    if { $ovars(sta_pt,is_flatten) == 1 } {
+        set netlist [list \
+            $ovars(lec_fm,implementation,top_net) \
+            $ovars(lec_fm,implementation,sub_net_1) \
+            $ovars(lec_fm,implementation,sub_net_2) \
+        ]
+
+        foreach each_netlist $netlist {
+            echo "read_verilog -netlist ${netlist}"
+            read_verilog -netlist ${each_netlist}
+        }
+
+    } else {
+        set netlist ${PD_OUT_PATH}/netlist/${top_design}.v
+        echo "read_verilog -netlist ${netlist}"
+        read_verilog -netlist ${netlist}
+    }
+
+    current_design ${top_design}
+    link > logs/link.log
 }
 
-if { [file exist ${netlist}] } {
-    echo "info : net - ${netlist}"
-	echo "netlist : ${netlist}" > netlist_info
-    read_verilog -netlist ${netlist}
-
-} else {
-    echo "ERROR : NO netlist - ${netlist}"
-    sh touch :ABNORMAL_ERROR_NO_NETLIST
-    exit
-
-}
-current_design ${top_design}
-link > logs/link.log
 ##########################################################
 #- uniquify
 ##########################################################

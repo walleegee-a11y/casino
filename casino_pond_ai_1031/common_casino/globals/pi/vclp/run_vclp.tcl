@@ -190,7 +190,7 @@ report_lp          > ./reports/report_lp.summary.rpt
 report_lp -verbose > ./reports/report_lp.rpt
 
 #if { [ string match "POST" ${pre_post} ] && ${check_pg} == 1 } {
-if { [ string match "post" ${pre_post} ] && ${check_pg} == 1 } {
+if { [ string match "post" ${pre_post} ] && $ovars(vclp,check_pg) == 1 } {
 	check_lp -stage pg -force
 	report_lp -verbose -file ./reports/report_lp.pg.rpt
 }

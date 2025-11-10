@@ -2492,3 +2492,4 @@ if monitor_process:
     print(f"Task monitor will continue running in {selected_terminal.value}. You can close it manually when done.")
     print("Monitor PID:", monitor_process.pid)
     print("To close the monitor: Press Ctrl+C in the monitor window or close the terminal window.")
+

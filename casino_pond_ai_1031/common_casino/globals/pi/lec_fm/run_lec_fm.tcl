@@ -118,10 +118,10 @@ if { ${ovars(lec_fm,is_flatten)} == "0" } {
 
     ## Revision (Flatten)
     set ref_type "net"
-    set reference [list \
-        ${ovars(lec_fm,reference,top_net)} \
-        ${ovars(lec_fm,reference,sub_net_1)} \
-        ${ovars(lec_fm,reference,sub_net_2)} \
+    set implementation [list \
+        ${OUTFEED_PATH}/${top_design}/pi___${db_ver}/${pi_ver}/netlist/${top_design}.v \
+        ${OUTFEED_PATH}/fb_right/pi___${db_ver}/${pi_ver}/netlist/fb_right.v \
+        ${OUTFEED_PATH}/fb_left/pi___${db_ver}/${pi_ver}/netlist/fb_left.v \
     ]
 
     foreach ref_net_itr $reference {
@@ -181,9 +181,9 @@ if { ${ovars(lec_fm,is_flatten)} == "0" } {
 
     ## Revision (Flatten)
     set implementation [list \
-        ${ovars(lec_fm,implementation,top_net)} \
-        ${ovars(lec_fm,implementation,sub_net_1)} \
-        ${ovars(lec_fm,implementation,sub_net_2)} \
+        ${PD_OUT_PATH}/netlist/${top_design}.v \
+        ${OUTFEED_PATH}/fb_right/pd___${db_ver}/$ovars(lec_fm,sub_block_version,fb_right)/netlist/fb_right.v \
+        ${OUTFEED_PATH}/fb_left/pd___${db_ver}/$ovars(lec_fm,sub_block_version,fb_right)/netlist/fb_left.v \
     ]
 
     foreach imp_net_itr $implementation {
@@ -201,26 +201,13 @@ set_top i:/WORK/$top_design
 ##################################################
 # Set constant
 ##################################################
-#set_constant -type port r:/WORK/ANA38414/u_pads/scan_mode_buf/Z 0
-#set_constant -type port i:/WORK/ANA38414/u_pads/scan_mode_buf/Z 0
-
-#if { ${top_design} == "ANA38414" } {
-#    puts "INFO: no set_constant rule for $top_design"
-#    set_constant -type port r:/WORK/ANA38414/u_pads/scan_en_buf/Z 0
-#    set_constant -type port i:/WORK/ANA38414/u_pads/scan_en_buf/Z 0
-#
-#} elseif { ${top_design} == "sdc_core0_wrap" } {
-#    set_constant -type port r:/WORK/sdc_core0_wrap/scan_en 0
-#    set_constant -type port i:/WORK/sdc_core0_wrap/scan_en 0
-#    source -e -v /mnt/data/prjs/ANA38414/works_rachel.han/sdc_core0_wrap/pi___net-4.0_dk-2.0_tag-0.0/runs/pre_source/set_constant_at_scan_lockup_latch.tcl
-#
-#} elseif { ${top_design} == "sdc_core1_wrap" } {
-#    set_constant -type port r:/WORK/sdc_core1_wrap/scan_en 0
-#    set_constant -type port i:/WORK/sdc_core1_wrap/scan_en 0
-#
-#} else {
-#    puts "INFO: no set_constant rule for $top_design"
-#}
+if { ${top_design} == "ANA6716" && $ovars(sta_pt,is_flatten) == 1 } {
+    puts "INFO: no set_constant rule for $top_design"
+    set_constant -type port r:/WORK/ANA6716/TCON/u_pads/u_mode_ctrl/u_scan_mode_dont/Z 0
+    set_constant -type port i:/WORK/ANA6716/TCON/u_pads/u_mode_ctrl/u_scan_mode_dont/Z 0
+} else {
+    puts "INFO: no set_constant rule for $top_design"
+}
 
 ##################################################
 ### Set dont verify

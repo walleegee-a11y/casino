@@ -909,7 +909,7 @@ class DescriptionHistoryDialog(QDialog):
 
         for line in diff:
             if line.startswith('- '):
-                html += f"<div class='removed'>− {self.escape_html(line[2:])}</div>"
+                html += f"<div class='removed'>? {self.escape_html(line[2:])}</div>"
             elif line.startswith('+ '):
                 html += f"<div class='added'>+ {self.escape_html(line[2:])}</div>"
             elif line.startswith('  '):
@@ -4026,4 +4026,5 @@ def launch_ftrack(prj_base=None):
 
 if __name__ == "__main__":
     launch_ftrack()
+
 

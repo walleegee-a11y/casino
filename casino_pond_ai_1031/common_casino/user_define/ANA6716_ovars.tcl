@@ -189,6 +189,7 @@ BUFM8NMB \
 ;#- PI
 ;##########################################################################
 set ovars(pi,default_pvt) "ss_0p72v_m40c" ;# string
+set ovars(vclp,check_pg) "0"
 
 ;##########################################################################
 ;#- lec_fm
@@ -207,16 +208,16 @@ set ovars(lec_fm,bbox_2) ""
 ## TODO(ANA6716) For flatten lec
 set ovars(lec_fm,is_flatten) "1" ;# boolean: < 0 | 1 >
 
-set ovars(lec_fm,reference,top_net)   "/mnt/data/prjs/ANA6716/dbs/interface/from_customer/12_20251017_NET/ANA6716_UMC22eHV_7T_pre0a_topo.scaniso2b.v" ;# ref_path
-set ovars(lec_fm,reference,sub_net_1) "/mnt/data/prjs/ANA6716/dbs/interface/from_customer/09_20251013_FB_NET/ANA6716_release_251013/fb_right_UMC22eHV_7T_pre0c_topo.scaniso2.v" ;# ref_path
-set ovars(lec_fm,reference,sub_net_2) "/mnt/data/prjs/ANA6716/dbs/interface/from_customer/09_20251013_FB_NET/ANA6716_release_251013/fb_left_UMC22eHV_7T_pre0c_topo.scaniso2.v" ;# ref_path
+set ovars(lec_fm,reference,top_net)   "" ;# ref_path
+set ovars(lec_fm,reference,sub_net_1) "" ;# ref_path
+set ovars(lec_fm,reference,sub_net_2) "" ;# ref_path
 
 set ovars(lec_fm,sub_block_version,fb_right) "01_net-08_CHANNEL_3um-fe00_te00_pv00"
 set ovars(lec_fm,sub_block_version,fb_left)  "01_net-08_CHANNEL_3um-fe00_te00_pv00"
 
-set ovars(lec_fm,implementation,top_net)   "${PD_OUT_PATH}/netlist/${top_design}.v" ;# imp_path 
-set ovars(lec_fm,implementation,sub_net_1) "${OUTFEED_PATH}/fb_right/pd___${db_ver}/$ovars(lec_fm,sub_block_version,fb_right)/netlist/fb_right.v" ;# imp_path 
-set ovars(lec_fm,implementation,sub_net_2) "${OUTFEED_PATH}/fb_left/pd___${db_ver}/$ovars(lec_fm,sub_block_version,fb_left)/netlist/fb_left.v" ;# imp_path 
+set ovars(lec_fm,implementation,top_net)   "" ;# imp_path
+set ovars(lec_fm,implementation,sub_net_1) "" ;# imp_path
+set ovars(lec_fm,implementation,sub_net_2) "" ;# imp_path
 
 
 ;##########################################################################
@@ -224,7 +225,7 @@ set ovars(lec_fm,implementation,sub_net_2) "${OUTFEED_PATH}/fb_left/pd___${db_ve
 ;##########################################################################
 set SYNOPSYS_LC_ROOT /mnt/appl/Tools_2024/synopsys/lc/S-2021.06-SP4P ;# TODO
 
-set ovars(sta_pt,sub_block_list) ""
+set ovars(sta_pt,sub_block_list) "fb_right fb_left"
 set ovars(sta_pt,sub_block_location_file) "/mnt/data/prjs/ANA6716/works_rachel.han/sub_block_location.info"
 set ovars(sta_pt,sub_block_version,fb_right) "01_net-08_CHANNEL_3um-fe00_te00_pv00"
 set ovars(sta_pt,sub_block_version,fb_left)  "01_net-08_CHANNEL_3um-fe00_te00_pv00"

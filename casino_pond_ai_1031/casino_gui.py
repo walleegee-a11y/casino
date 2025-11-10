@@ -206,6 +206,7 @@ class CommandExecutionThread(QThread):
                         encoding='utf-8',
                         errors='replace',
                         shell=True,
+                        start_new_session=True,
                         bufsize=bufsize,
                         env=env
                     )
