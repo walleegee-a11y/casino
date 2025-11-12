@@ -97,16 +97,9 @@ class ReportTableWidget(QWidget):
         # Category selector
         toolbar.addWidget(QLabel("Category:"))
         self.category_combo = QComboBox()
-        self.category_combo.addItems([
-            "STA Timing",
-            "STA Violations",
-            "STA VTH Ratio",
-            "STA Cell Usage",
-            "PV (DRC/LVS/PERC)",
-            "APR Timing",
-            "APR Congestion",
-            "All Metrics"
-        ])
+        # Add placeholder - will be replaced when data is loaded
+        self.category_combo.addItem("(No data loaded)")
+        self.category_combo.setEnabled(False)
         self.category_combo.currentTextChanged.connect(self._on_category_changed)
         toolbar.addWidget(self.category_combo)
 
@@ -138,6 +131,20 @@ class ReportTableWidget(QWidget):
         self.pv_perc_table = self._create_table_widget("PERC Results")
         self.apr_timing_table = self._create_table_widget("APR Timing Summary")
         self.apr_congestion_table = self._create_table_widget("APR Congestion")
+
+        # Store original table references (to restore after multi-run mode)
+        self._original_tables = {
+            'sta': self.sta_table,
+            'violation': self.violation_table,
+            'vth': self.vth_table,
+            'cell_usage': self.cell_usage_table,
+            'pv_drc': self.pv_drc_table,
+            'pv_lvs': self.pv_lvs_table,
+            'pv_flipchip': self.pv_flipchip_table,
+            'pv_perc': self.pv_perc_table,
+            'apr_timing': self.apr_timing_table,
+            'apr_congestion': self.apr_congestion_table
+        }
 
         # Add all tables to splitter (will be hidden/shown as needed)
         self.splitter.addWidget(self.sta_table)
@@ -183,6 +190,48 @@ class ReportTableWidget(QWidget):
 
         return table
 
+    def _restore_original_tables(self):
+        """Restore original table references and clear splitter after multi-run mode"""
+        # Clear splitter
+        for i in reversed(range(self.splitter.count())):
+            widget = self.splitter.widget(i)
+            if widget:
+                widget.setParent(None)
+
+        # Restore original table references
+        self.sta_table = self._original_tables['sta']
+        self.violation_table = self._original_tables['violation']
+        self.vth_table = self._original_tables['vth']
+        self.cell_usage_table = self._original_tables['cell_usage']
+        self.pv_drc_table = self._original_tables['pv_drc']
+        self.pv_lvs_table = self._original_tables['pv_lvs']
+        self.pv_flipchip_table = self._original_tables['pv_flipchip']
+        self.pv_perc_table = self._original_tables['pv_perc']
+        self.apr_timing_table = self._original_tables['apr_timing']
+        self.apr_congestion_table = self._original_tables['apr_congestion']
+
+        # Re-add original tables to splitter
+        self.splitter.addWidget(self.sta_table)
+        self.splitter.addWidget(self.violation_table)
+        self.splitter.addWidget(self.vth_table)
+        self.splitter.addWidget(self.cell_usage_table)
+        self.splitter.addWidget(self.pv_drc_table)
+        self.splitter.addWidget(self.pv_lvs_table)
+        self.splitter.addWidget(self.pv_flipchip_table)
+        self.splitter.addWidget(self.pv_perc_table)
+        self.splitter.addWidget(self.apr_timing_table)
+        self.splitter.addWidget(self.apr_congestion_table)
+
+        # Hide all tables initially
+        for table in [self.sta_table, self.violation_table, self.vth_table,
+                     self.cell_usage_table, self.pv_drc_table, self.pv_lvs_table,
+                     self.pv_flipchip_table, self.pv_perc_table,
+                     self.apr_timing_table, self.apr_congestion_table]:
+            try:
+                table.setVisible(False)
+            except RuntimeError:
+                pass
+
     def set_keyword_groups(self, keyword_groups: Dict[str, List[str]]):
         """Set keyword group mappings from YAML configuration"""
         self.keyword_groups = keyword_groups
@@ -227,6 +276,13 @@ class ReportTableWidget(QWidget):
             rest = ' '.join(word.capitalize() for word in parts[1:])
             return f"STA {rest}"
 
+        # Handle apr_inn_ prefix
+        if parts[0] == 'apr' and len(parts) > 2 and parts[1] == 'inn':
+            # apr_inn_setup_timing -> APR Setup Timing
+            # apr_inn_congestion -> APR Congestion
+            rest = ' '.join(word.capitalize() for word in parts[2:])
+            return f"APR {rest}"
+
         # Default: capitalize each part
         return ' '.join(word.capitalize() for word in parts)
 
@@ -257,9 +313,9 @@ class ReportTableWidget(QWidget):
         elif "pv" in category_lower and "perc" in category_lower:
             return self.pv_perc_table
         # APR categories
-        elif "timing" in category_lower and "apr" not in category_lower.replace("sta", ""):
+        elif "apr" in category_lower and "timing" in category_lower:
             return self.apr_timing_table
-        elif "congestion" in category_lower:
+        elif "apr" in category_lower and "congestion" in category_lower:
             return self.apr_congestion_table
 
         return None
@@ -298,9 +354,13 @@ class ReportTableWidget(QWidget):
         elif "pv" in category_lower and "perc" in category_lower:
             return self._populate_pv_perc_table
         # APR categories
-        elif "timing" in category_lower and "apr" not in category_lower.replace("sta", ""):
-            return self._populate_apr_timing_table
-        elif "congestion" in category_lower:
+        elif "apr" in category_lower and "setup timing" in category_lower:
+            return lambda: self._populate_apr_timing_table(filter_timing='s')
+        elif "apr" in category_lower and "hold timing" in category_lower:
+            return lambda: self._populate_apr_timing_table(filter_timing='h')
+        elif "apr" in category_lower and "timing" in category_lower:
+            return lambda: self._populate_apr_timing_table(filter_timing=None)
+        elif "apr" in category_lower and "congestion" in category_lower:
             return self._populate_apr_congestion_table
 
         return None
@@ -395,6 +455,9 @@ class ReportTableWidget(QWidget):
         self.current_headers = headers
         self.multiple_runs_data = {}  # Clear multi-run state
         self.view_mode_btn.setVisible(False)  # Hide toggle button
+
+        # Restore original table references and splitter state
+        self._restore_original_tables()
 
         # Update run info label
         run_path = combined_tasks[0]['run_path']
@@ -492,13 +555,21 @@ class ReportTableWidget(QWidget):
         # Block signals to prevent multiple triggers
         self.category_combo.blockSignals(True)
         self.category_combo.clear()
-        self.category_combo.addItems(categories)
 
-        # Try to restore previous selection if still available, otherwise select first
-        if current_category in categories:
-            self.category_combo.setCurrentText(current_category)
-        elif categories:
-            self.category_combo.setCurrentIndex(0)
+        if categories:
+            # Populate with actual categories
+            self.category_combo.addItems(categories)
+            self.category_combo.setEnabled(True)
+
+            # Try to restore previous selection if still available, otherwise select first
+            if current_category in categories:
+                self.category_combo.setCurrentText(current_category)
+            else:
+                self.category_combo.setCurrentIndex(0)
+        else:
+            # No categories found
+            self.category_combo.addItem("(No categories found)")
+            self.category_combo.setEnabled(False)
 
         # Unblock signals
         self.category_combo.blockSignals(False)
@@ -557,12 +628,6 @@ class ReportTableWidget(QWidget):
             categories.append(category_name)
             print(f"[DEBUG] Group '{group}' -> category '{category_name}'")
 
-        # Always add "All Metrics" option
-        if categories:
-            categories.append("All Metrics")
-        else:
-            categories = ["All Metrics"]
-
         print(f"[DEBUG] Final categories: {categories}")
         return categories
 
@@ -579,13 +644,25 @@ class ReportTableWidget(QWidget):
         from .keyword_parser import STAKeyword, PVKeyword, ViolationKeyword, GenericKeyword, VTHKeyword, CellUsageKeyword
 
         if isinstance(parsed, STAKeyword):
-            # Differentiate between setup and hold timing
-            if parsed.timing_type == 's':
-                return "sta_setup_timing"
-            elif parsed.timing_type == 'h':
-                return "sta_hold_timing"
+            # Check if this is APR or STA based on mode
+            # APR modes include: 'apr', and APR task stages like 'init', 'place', 'cts', 'postcts', 'route', 'postroute', 'chipfinish'
+            apr_modes = {'apr', 'init', 'place', 'cts', 'postcts', 'route', 'postroute', 'chipfinish'}
+            if parsed.mode in apr_modes:
+                # APR keywords (e.g., apr_inn_s_wns or cts_inn_apr_inn_s_wns)
+                if parsed.timing_type == 's':
+                    return "apr_inn_setup_timing"
+                elif parsed.timing_type == 'h':
+                    return "apr_inn_hold_timing"
+                else:
+                    return "apr_inn_timing"  # Fallback
             else:
-                return "sta_timing"  # Fallback
+                # STA keywords
+                if parsed.timing_type == 's':
+                    return "sta_setup_timing"
+                elif parsed.timing_type == 'h':
+                    return "sta_hold_timing"
+                else:
+                    return "sta_timing"  # Fallback
         elif isinstance(parsed, ViolationKeyword):
             # Differentiate between violation types
             if parsed.violation_type == 'max_tran':
@@ -628,9 +705,17 @@ class ReportTableWidget(QWidget):
         # Block signals to prevent multiple triggers
         self.category_combo.blockSignals(True)
         self.category_combo.clear()
-        self.category_combo.addItems(categories)
+
         if categories:
+            # Populate with actual categories
+            self.category_combo.addItems(categories)
+            self.category_combo.setEnabled(True)
             self.category_combo.setCurrentIndex(0)
+        else:
+            # No categories found
+            self.category_combo.addItem("(No categories found)")
+            self.category_combo.setEnabled(False)
+
         self.category_combo.blockSignals(False)
 
     def _refresh_view(self):
@@ -658,31 +743,16 @@ class ReportTableWidget(QWidget):
 
         # Single run mode - original behavior
         print(f"[DEBUG] Single-run mode")
-        # Hide all tables
+        # Hide all tables (with error handling for deleted tables)
         for table in [self.sta_table, self.violation_table, self.vth_table,
                      self.cell_usage_table, self.pv_drc_table, self.pv_lvs_table,
                      self.pv_flipchip_table, self.pv_perc_table,
                      self.apr_timing_table, self.apr_congestion_table]:
-            table.setVisible(False)
-
-        # Handle "All Metrics" specially - only show tables with data
-        if category == "All Metrics":
-            print(f"[DEBUG] Populating all tables for 'All Metrics'")
-            self._populate_all_tables()
-            # Only show tables that have data (more than just header row or empty state)
-            for table in [self.sta_table, self.violation_table, self.vth_table,
-                         self.cell_usage_table, self.pv_drc_table, self.pv_lvs_table,
-                         self.pv_flipchip_table, self.pv_perc_table,
-                         self.apr_timing_table, self.apr_congestion_table]:
-                # Check if table has actual data (not just empty message)
-                has_data = (table.rowCount() > 0 and
-                           table.columnCount() > 1 and
-                           not (table.rowCount() == 1 and
-                                table.columnCount() == 1 and
-                                table.item(0, 0) and
-                                'No' in table.item(0, 0).text()))
-                table.setVisible(has_data)
-            return
+            try:
+                table.setVisible(False)
+            except RuntimeError:
+                # Table was deleted, skip it
+                pass
 
         # Dynamic routing based on category name
         populate_method = self._category_to_populate_method(category)
@@ -835,6 +905,20 @@ class ReportTableWidget(QWidget):
         """Populate pivot table based on parsed keyword type"""
         from .keyword_parser import STAKeyword, PVKeyword, ViolationKeyword, VTHKeyword, CellUsageKeyword, GenericKeyword
 
+        # Filter parsed_rows to only include keywords of the same type as sample_parsed
+        # This prevents AttributeError when mixed keyword types are present
+        sample_type = type(sample_parsed)
+        filtered_rows = [row for row in parsed_rows if isinstance(row['parsed'], sample_type)]
+
+        if not filtered_rows:
+            # No matching keywords, show empty table
+            table.setRowCount(0)
+            table.setColumnCount(0)
+            return
+
+        # Use filtered_rows instead of parsed_rows for all operations below
+        parsed_rows = filtered_rows
+
         if isinstance(sample_parsed, STAKeyword):
             # STA keywords: Mode | Corner | Timing | Metric | Path Type | Run1 | Run2...
             headers = ["Mode", "Corner", "Timing", "Metric", "Path Type"] + run_names
@@ -955,7 +1039,7 @@ class ReportTableWidget(QWidget):
             for group_name, group_keywords in self.keyword_groups.items():
                 if kw_name in group_keywords:
                     category_name = self._group_to_category_name(group_name)
-                    if category_name == category or category == "All Metrics":
+                    if category_name == category:
                         filtered.append(kw_name)
                     found_in_yaml = True
                     break
@@ -970,11 +1054,8 @@ class ReportTableWidget(QWidget):
                 inferred_group = self._infer_group_from_parsed_keyword(parsed)
                 if inferred_group:
                     category_name = self._group_to_category_name(inferred_group)
-                    if category_name == category or category == "All Metrics":
+                    if category_name == category:
                         filtered.append(kw_name)
-                elif category == "All Metrics":
-                    # Include unparseable keywords in "All Metrics"
-                    filtered.append(kw_name)
 
         return filtered
 
@@ -999,9 +1080,22 @@ class ReportTableWidget(QWidget):
             self._set_empty_table(self.sta_table, "No STA timing metrics found")
             return
 
-        # Collect all unique path types
+        # Filter out APR keywords - only keep actual STA keywords
+        # APR modes include: 'apr', and APR task stages like 'init', 'place', 'cts', 'postcts', 'route', 'postroute', 'chipfinish'
+        apr_modes = {'apr', 'init', 'place', 'cts', 'postcts', 'route', 'postroute', 'chipfinish'}
+        filtered_sta_keywords = {}
+        for mode, mode_data in grouping.sta_keywords.items():
+            if mode in apr_modes:
+                continue  # Skip APR keywords
+            filtered_sta_keywords[mode] = mode_data
+
+        if not filtered_sta_keywords:
+            self._set_empty_table(self.sta_table, "No STA timing metrics found")
+            return
+
+        # Collect all unique path types from STA keywords only
         path_types = set()
-        for mode_data in grouping.sta_keywords.values():
+        for mode_data in filtered_sta_keywords.values():
             for corner_data in mode_data.values():
                 for timing_data in corner_data.values():
                     for metric_keywords in timing_data.values():
@@ -1012,8 +1106,6 @@ class ReportTableWidget(QWidget):
 
         # Set up table columns: Mode | Corner | Timing | Metric | {path_types}
         headers = ["Mode", "Corner", "Timing", "Metric"] + path_types
-        self.sta_table.setColumnCount(len(headers))
-        self.sta_table.setHorizontalHeaderLabels(headers)
 
         # Populate rows (filter by timing type if specified)
         rows = []
@@ -1026,13 +1118,13 @@ class ReportTableWidget(QWidget):
         else:
             timing_types = ['s', 'h']  # Show both
 
-        for mode in sorted(grouping.sta_keywords.keys(), key=self.parser.natural_sort_key):
-            for corner in sorted(grouping.sta_keywords[mode].keys(), key=self.parser.natural_sort_key):
+        for mode in sorted(filtered_sta_keywords.keys(), key=self.parser.natural_sort_key):
+            for corner in sorted(filtered_sta_keywords[mode].keys(), key=self.parser.natural_sort_key):
                 for timing_type in timing_types:
-                    if timing_type not in grouping.sta_keywords[mode][corner]:
+                    if timing_type not in filtered_sta_keywords[mode][corner]:
                         continue
 
-                    timing_data = grouping.sta_keywords[mode][corner][timing_type]
+                    timing_data = filtered_sta_keywords[mode][corner][timing_type]
                     timing_label = "Setup" if timing_type == 's' else "Hold"
 
                     for metric in ['wns', 'tns', 'num']:  # Standard order
@@ -1074,8 +1166,6 @@ class ReportTableWidget(QWidget):
 
         # Table columns: Mode | Corner | Violation Type | Count | Worst Value
         headers = ["Mode", "Corner", "Violation Type", "Sub Type", "Count", "Worst"]
-        self.violation_table.setColumnCount(len(headers))
-        self.violation_table.setHorizontalHeaderLabels(headers)
 
         rows = []
         for mode in sorted(grouping.violation_keywords.keys()):
@@ -1124,8 +1214,6 @@ class ReportTableWidget(QWidget):
             return
 
         headers = ["VTH Type", "Percentage"]
-        self.vth_table.setColumnCount(len(headers))
-        self.vth_table.setHorizontalHeaderLabels(headers)
 
         rows = []
         for kw in grouping.vth_keywords:
@@ -1148,8 +1236,6 @@ class ReportTableWidget(QWidget):
             return
 
         headers = ["Cell Type", "Instance Count", "Area (um^2)"]
-        self.cell_usage_table.setColumnCount(len(headers))
-        self.cell_usage_table.setHorizontalHeaderLabels(headers)
 
         # Group by cell type (extract from keyword name)
         cell_types = {}
@@ -1193,8 +1279,6 @@ class ReportTableWidget(QWidget):
 
         # LVS has different columns: Status instead of Cell/Flatten counts
         headers = ["Check Type", "Status"]
-        self.pv_lvs_table.setColumnCount(len(headers))
-        self.pv_lvs_table.setHorizontalHeaderLabels(headers)
 
         rows = []
         for kw in grouping.pv_keywords['LVS']:
@@ -1231,9 +1315,6 @@ class ReportTableWidget(QWidget):
         if category_name not in grouping.pv_keywords or not grouping.pv_keywords[category_name]:
             self._set_empty_table(table_widget, f"No {category_name} metrics found")
             return
-
-        table_widget.setColumnCount(len(headers))
-        table_widget.setHorizontalHeaderLabels(headers)
 
         # Group keywords by rule (combine _cell and _flatten entries for DRC/FlipChip)
         rules_data = {}
@@ -1284,8 +1365,12 @@ class ReportTableWidget(QWidget):
 
         self._fill_table(table_widget, headers, rows)
 
-    def _populate_apr_timing_table(self):
-        """Populate APR timing summary (generic s_wns, s_tns, h_wns, h_tns)"""
+    def _populate_apr_timing_table(self, filter_timing=None):
+        """Populate APR timing summary using STAKeyword objects with mode='apr'
+
+        Args:
+            filter_timing: 's' for setup only, 'h' for hold only, None for both
+        """
         if not self.current_run_data:
             return
 
@@ -1293,26 +1378,77 @@ class ReportTableWidget(QWidget):
         keyword_names = list(keywords_data.keys())
         grouping = self.parser.group_keywords(keyword_names, self.keyword_groups)
 
-        if not grouping.timing_keywords:
+        if not grouping.sta_keywords:
             self._set_empty_table(self.apr_timing_table, "No APR timing data found")
             return
 
-        headers = ["Timing Type", "Metric", "Value"]
-        self.apr_timing_table.setColumnCount(len(headers))
-        self.apr_timing_table.setHorizontalHeaderLabels(headers)
+        # Filter for APR keywords only (mode='apr' or mode starts with apr task names)
+        apr_keywords = {}
+        for mode, mode_data in grouping.sta_keywords.items():
+            # Include mode='apr' and task-specific modes like 'cts', 'postcts', 'route', etc.
+            # (These are apr_inn task stages)
+            if mode == 'apr' or mode in ['init', 'place', 'cts', 'postcts', 'route', 'postroute', 'chipfinish']:
+                apr_keywords[mode] = mode_data
 
+        if not apr_keywords:
+            self._set_empty_table(self.apr_timing_table, "No APR timing data found")
+            return
+
+        # Collect all unique path types
+        path_types = set()
+        for mode_data in apr_keywords.values():
+            for corner_data in mode_data.values():
+                for timing_data in corner_data.values():
+                    for metric_keywords in timing_data.values():
+                        for kw in metric_keywords:
+                            path_types.add(kw.path_type)
+
+        path_types = sorted(path_types, key=lambda x: (x != 'all', x))  # 'all' first
+
+        # Set up table columns: Mode | Corner | Timing | Metric | {path_types}
+        headers = ["Mode", "Corner", "Timing", "Metric"] + path_types
+
+        # Populate rows
         rows = []
-        for kw in grouping.timing_keywords:
-            parts = kw.name.split('_')
-            timing_type = "Setup" if parts[0] == 's' else "Hold"
-            metric = parts[1].upper() if len(parts) > 1 else kw.name
+        timing_types = []
+        if filter_timing == 's':
+            timing_types = ['s']
+        elif filter_timing == 'h':
+            timing_types = ['h']
+        else:
+            timing_types = ['s', 'h']
 
-            value = keywords_data.get(kw.original_name, '-')
-            rows.append({
-                'Timing Type': timing_type,
-                'Metric': metric,
-                'Value': value
-            })
+        for mode in sorted(apr_keywords.keys(), key=self.parser.natural_sort_key):
+            for corner in sorted(apr_keywords[mode].keys(), key=self.parser.natural_sort_key):
+                for timing_type in timing_types:
+                    if timing_type not in apr_keywords[mode][corner]:
+                        continue
+
+                    timing_data = apr_keywords[mode][corner][timing_type]
+                    timing_label = "Setup" if timing_type == 's' else "Hold"
+
+                    for metric in ['wns', 'tns', 'num']:
+                        if metric not in timing_data:
+                            continue
+
+                        row_data = {
+                            'Mode': mode,
+                            'Corner': corner,
+                            'Timing': timing_label,
+                            'Metric': metric.upper()
+                        }
+
+                        # Fill path type values
+                        for path_type in path_types:
+                            kw_list = timing_data[metric]
+                            matching_kw = next((kw for kw in kw_list if kw.path_type == path_type), None)
+                            if matching_kw:
+                                value = keywords_data.get(matching_kw.original_name, '-')
+                                row_data[path_type] = value
+                            else:
+                                row_data[path_type] = '-'
+
+                        rows.append(row_data)
 
         self._fill_table(self.apr_timing_table, headers, rows)
 
@@ -1330,8 +1466,6 @@ class ReportTableWidget(QWidget):
             return
 
         headers = ["Metric", "Value"]
-        self.apr_congestion_table.setColumnCount(len(headers))
-        self.apr_congestion_table.setHorizontalHeaderLabels(headers)
 
         rows = []
         for kw in grouping.congestion_keywords:
@@ -1343,19 +1477,18 @@ class ReportTableWidget(QWidget):
 
         self._fill_table(self.apr_congestion_table, headers, rows)
 
-    def _populate_all_tables(self):
-        """Populate all tables"""
-        self._populate_sta_timing_table()
-        self._populate_violation_table()
-        self._populate_pv_drc_table()
-        self._populate_pv_lvs_table()
-        self._populate_pv_flipchip_table()
-        self._populate_pv_perc_table()
-        self._populate_apr_timing_table()
-        self._populate_apr_congestion_table()
-
     def _fill_table(self, table: QTableWidget, headers: List[str], rows: List[Dict[str, Any]]):
         """Fill a table widget with data"""
+        # Clear table completely before filling
+        table.clearContents()
+        table.setRowCount(0)
+        table.setColumnCount(0)
+
+        # Set up headers
+        table.setColumnCount(len(headers))
+        table.setHorizontalHeaderLabels(headers)
+
+        # Set row count
         table.setRowCount(len(rows))
 
         for row_idx, row_data in enumerate(rows):
@@ -1486,26 +1619,12 @@ class ReportTableWidget(QWidget):
                         csv_lines.append("")
             else:
                 # Single run mode: original behavior
-                if category == "All Metrics":
-                    tables = [
-                        (self.sta_table, "STA Timing"),
-                        (self.violation_table, "Violations"),
-                        (self.vth_table, "VTH Ratio"),
-                        (self.cell_usage_table, "Cell Usage"),
-                        (self.pv_drc_table, "PV - DRC"),
-                        (self.pv_lvs_table, "PV - LVS"),
-                        (self.pv_flipchip_table, "PV - FlipChip"),
-                        (self.pv_perc_table, "PV - PERC"),
-                        (self.apr_timing_table, "APR Timing"),
-                        (self.apr_congestion_table, "APR Congestion")
-                    ]
+                # Map category to table widget - use _category_to_table_widget for consistency
+                table_widget = self._category_to_table_widget(category)
+                if table_widget:
+                    tables = [(table_widget, category)]
                 else:
-                    # Map category to table widget - use _category_to_table_widget for consistency
-                    table_widget = self._category_to_table_widget(category)
-                    if table_widget:
-                        tables = [(table_widget, category)]
-                    else:
-                        tables = []
+                    tables = []
 
                 for table, section_name in tables:
                     if table is None or table.rowCount() == 0:
