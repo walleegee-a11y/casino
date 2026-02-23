@@ -142,6 +142,18 @@ class DirectoryScanner(QThread):
             self._load_children_with_progress(hierarchy, path, current_depth)
         elif already_visited and is_symlink:
             logger.debug(f"Symlink '{path.name}' points to already-visited path {real_path}, showing without children")
+        elif not already_visited and not self._cancelled:
+            # Stopped due to depth limit — check if directory actually has subdirectories
+            # before marking shallow (avoids spurious expand arrows on childless leaf nodes)
+            try:
+                has_subdirs = any(
+                    e.is_dir(follow_symlinks=True)
+                    for e in os.scandir(str(path))
+                )
+                if has_subdirs:
+                    hierarchy.is_shallow = True
+            except (OSError, PermissionError):
+                hierarchy.is_shallow = True  # Assume children exist if can't check
 
         return hierarchy
 
@@ -246,33 +258,91 @@ class DirectoryService(QObject):
     hierarchy_updated = pyqtSignal(DirectoryHierarchy)
     operation_completed = pyqtSignal(str, bool)  # operation_name, success
     progress_updated = pyqtSignal(str, int)
+    subtree_scan_completed = pyqtSignal(object, object)  # (Path, DirectoryHierarchy)
+    background_scan_completed = pyqtSignal(DirectoryHierarchy)  # Silent deep scan result
 
     def __init__(self, config: AppConfig):
         super().__init__()
         self.config = config
         self._current_hierarchy: Optional[DirectoryHierarchy] = None
         self._scanner: Optional[DirectoryScanner] = None
+        self._subtree_scanners: Dict[Path, DirectoryScanner] = {}  # Active on-demand scans
+        self._background_scanner: Optional[DirectoryScanner] = None  # Silent deep scan
 
-    def scan_directory_async(self, base_path: Path, fast_mode: bool = True):
+    def scan_directory_async(self, base_path: Path, fast_mode: bool = True,
+                             max_depth: Optional[int] = None):
         """Scan directory hierarchy asynchronously.
 
         Args:
             base_path: Directory to scan
             fast_mode: If True, skip expensive metadata checks (much faster)
+            max_depth: Maximum depth to scan (defaults to config value)
         """
+        if max_depth is None:
+            max_depth = self.config.ui.max_directory_depth
+
         if self._scanner and self._scanner.isRunning():
             self._scanner.cancel()
             self._scanner.wait()
 
+        # Cancel any background deep scan — foreground scan takes priority
+        self.cancel_background_scan()
+
         self._scanner = DirectoryScanner(
             base_path,
-            self.config.ui.max_directory_depth,
+            max_depth,
             fast_mode=fast_mode
         )
         self._scanner.progress_updated.connect(self.progress_updated)
         self._scanner.scan_completed.connect(self._on_scan_completed)
         self._scanner.scan_error.connect(self._on_scan_error)
         self._scanner.start()
+
+    def scan_subtree_async(self, path: Path, additional_depth: int = 6):
+        """Scan a subdirectory on demand when the user expands a shallow node.
+
+        Args:
+            path: Directory to scan
+            additional_depth: How many levels to scan from this node
+        """
+        # Skip if already scanning this path
+        existing = self._subtree_scanners.get(path)
+        if existing and existing.isRunning():
+            return
+
+        scanner = DirectoryScanner(path, additional_depth, fast_mode=True)
+        scanner.scan_completed.connect(
+            lambda hier, p=path: self._on_subtree_scan_completed(p, hier)
+        )
+        scanner.start()
+        self._subtree_scanners[path] = scanner
+
+    def scan_background_deep_async(self, base_path: Path):
+        """Start a silent full-depth background scan after the initial shallow scan.
+
+        Runs at lowest priority and emits background_scan_completed when done.
+        Does NOT emit progress updates — invisible to the user.
+        """
+        # Cancel any existing background scan before starting a new one
+        if self._background_scanner and self._background_scanner.isRunning():
+            self._background_scanner.cancel()
+            self._background_scanner.wait()
+
+        max_depth = self.config.ui.max_directory_depth
+        self._background_scanner = DirectoryScanner(base_path, max_depth, fast_mode=True)
+        # No progress_updated connection — runs silently
+        self._background_scanner.scan_completed.connect(self.background_scan_completed)
+        self._background_scanner.start()
+
+    def cancel_background_scan(self):
+        """Cancel any running background deep scan."""
+        if self._background_scanner and self._background_scanner.isRunning():
+            self._background_scanner.cancel()
+
+    def _on_subtree_scan_completed(self, path: Path, hierarchy: DirectoryHierarchy):
+        """Handle completed on-demand subtree scan."""
+        self._subtree_scanners.pop(path, None)
+        self.subtree_scan_completed.emit(path, hierarchy)
 
     def _on_scan_completed(self, hierarchy: DirectoryHierarchy):
         """Handle completed directory scan."""

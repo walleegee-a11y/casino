@@ -323,6 +323,11 @@ class MainWindow(QMainWindow):
         self.directory_service.hierarchy_updated.connect(self.on_hierarchy_updated)
         self.directory_service.operation_completed.connect(self.on_operation_completed)
         self.directory_service.progress_updated.connect(self.on_progress_updated)
+        self.directory_service.subtree_scan_completed.connect(self._on_subtree_scan_completed)
+        self.directory_service.background_scan_completed.connect(self._on_background_scan_completed)
+
+        # Lazy on-demand deep scan when user expands a shallow node
+        self.tree_view.expanded.connect(self._on_tree_item_expanded)
 
         # Memo service connections
         self.memo_service.memo_added.connect(lambda path, memo: self.on_memo_changed())
@@ -452,9 +457,9 @@ class MainWindow(QMainWindow):
         else:
             print(f"DEBUG: refresh_directory_tree - skipping history add (programmatic)")
 
-        # Use limited initial depth for faster loading
+        # Use limited initial depth for faster startup — expand on demand
         initial_depth = min(self.config.ui.initial_scan_depth, self.config.ui.max_directory_depth)
-        self.directory_service.scan_directory_async(base_path, fast_mode=True)
+        self.directory_service.scan_directory_async(base_path, fast_mode=True, max_depth=initial_depth)
 
     def go_back(self):
         """Go back in history."""
@@ -653,7 +658,7 @@ class MainWindow(QMainWindow):
             self.change_service.capture_state(hierarchy)
 
         self.current_hierarchy = hierarchy
-        self.max_depth = hierarchy.calculate_max_depth()
+        self.max_depth = self.config.ui.max_directory_depth  # Always show full range 0–max
 
         self.depth_controls.update_depth_buttons(self.max_depth)
         self.status_widget.update_depth_status(self.current_depth, self.max_depth)
@@ -663,6 +668,12 @@ class MainWindow(QMainWindow):
 
         # Setup filesystem watcher on base directory for auto-refresh
         self._setup_fs_watcher()
+
+        # If this was a shallow initial scan, kick off silent background scan for depths 4-6
+        if hierarchy.calculate_max_depth() < self.config.ui.max_directory_depth:
+            base_path = Path(self.base_dir_input.text().strip())
+            self.status_widget.set_help_text("Scanning depth 4-6 in background...")
+            QTimer.singleShot(500, lambda: self.directory_service.scan_background_deep_async(base_path))
 
     def save_expand_state(self) -> set:
         """Save currently expanded paths from tree view."""
@@ -836,6 +847,45 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(1500, self.scan_progress_bar.hide_progress)
         else:
             self.progress_widget.show_progress(message, progress)
+
+    @pyqtSlot(QModelIndex)
+    def _on_tree_item_expanded(self, index: QModelIndex):
+        """Trigger on-demand background scan when the user expands a shallow node."""
+        if not index.isValid() or not self.tree_model:
+            return
+
+        item = index.internalPointer()
+        if not hasattr(item, 'directory_hierarchy'):
+            return
+
+        hierarchy = item.directory_hierarchy
+        if not hierarchy.is_shallow:
+            return  # Already fully scanned — nothing to do
+
+        # Scan one level at a time — user sees children appear and can keep going deeper
+        self.directory_service.scan_subtree_async(hierarchy.root.path, additional_depth=1)
+
+    def _on_subtree_scan_completed(self, path, new_hierarchy):
+        """Merge completed on-demand subtree scan into the model without full rebuild."""
+        if self.tree_model:
+            from pathlib import Path as _Path
+            self.tree_model.update_subtree(
+                _Path(path) if isinstance(path, str) else path,
+                new_hierarchy
+            )
+
+    @pyqtSlot(object)
+    def _on_background_scan_completed(self, hierarchy: DirectoryHierarchy):
+        """Silently replace shallow hierarchy with fully-scanned deep hierarchy.
+
+        Called when the background deep scan (depths 4-6) finishes after the
+        initial fast 3-level startup scan.  Preserves expand state and selection.
+        """
+        logger.info(f"Background deep scan complete, max depth: {hierarchy.calculate_max_depth()}")
+        self.current_hierarchy = hierarchy
+        # update_tree_view() already saves/restores expand state and selection
+        self.update_tree_view()
+        self.show_status_message("Tree fully loaded (depth 1-6)", 3000)
 
     @pyqtSlot(str, bool)
     def on_operation_completed(self, operation: str, success: bool):

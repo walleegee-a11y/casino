@@ -92,7 +92,7 @@ class UIConfig:
     # Tree view settings
     tree_minimum_height: int = 400
     max_directory_depth: int = 6
-    initial_scan_depth: int = 3  # NEW: Only scan 3 levels initially for speed
+    initial_scan_depth: int = 3  # Only scan 3 levels initially for speed; background scan fills depth 4-6
 
     # Terminal settings
     terminal_geometry: str = "120x40"

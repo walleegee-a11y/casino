@@ -333,6 +333,26 @@ class DirectoryTreeModel(QAbstractItemModel):
 
         return QVariant()
 
+    def hasChildren(self, parent: QModelIndex = QModelIndex()) -> bool:
+        """Override to show expand arrow for shallow (not yet scanned) nodes."""
+        if not parent.isValid():
+            return self.root_item.child_count() > 0
+
+        item = parent.internalPointer()
+        if not isinstance(item, TreeItem):
+            return False
+
+        # Actual loaded children take priority
+        if item._children_loaded:
+            return len(item.child_items) > 0
+
+        # Hierarchy already has children data
+        if len(item.directory_hierarchy.children) > 0:
+            return True
+
+        # Shallow node: scan stopped here, might have children on disk
+        return item.directory_hierarchy.is_shallow
+
     def flags(self, index: QModelIndex) -> Qt.ItemFlags:
         """Get item flags."""
         if not index.isValid():
@@ -555,6 +575,50 @@ class DirectoryTreeModel(QAbstractItemModel):
             self.index(self.rowCount() - 1, 0),
             [Qt.DisplayRole, Qt.ToolTipRole]
         )
+
+    def update_subtree(self, path, new_hierarchy):
+        """Merge on-demand subtree scan results into the existing model.
+
+        Called when the user expands a shallow node and the background scan completes.
+        Updates the node's children in-place without rebuilding the whole model.
+        """
+        item = self._path_index_map.get(path)
+        if not item:
+            return
+
+        parent_index = self.createIndex(item.row(), 0, item)
+
+        # Count existing children (may be 0 for a shallow node)
+        old_child_count = (len(item.child_items) if item._children_loaded
+                           else len(item.directory_hierarchy.children))
+
+        # Remove old rows from model (usually 0 for shallow nodes)
+        if old_child_count > 0:
+            self.beginRemoveRows(parent_index, 0, old_child_count - 1)
+            # Remove old paths from index map
+            for child_path in list(item.directory_hierarchy.children.keys()):
+                self._path_index_map.pop(child_path, None)
+            item.child_items.clear()
+            item._children_loaded = False
+            item._children_sorted = False
+            self.endRemoveRows()
+        else:
+            item._children_loaded = False
+            item._children_sorted = False
+
+        # Swap in the new hierarchy data
+        item.directory_hierarchy.children = new_hierarchy.children
+        item.directory_hierarchy.is_shallow = False  # Now fully scanned
+
+        # Insert new children into the model
+        new_count = len(new_hierarchy.children)
+        if new_count > 0:
+            self.beginInsertRows(parent_index, 0, new_count - 1)
+            item._ensure_children_loaded()  # Creates TreeItems + populates path index map
+            self.endInsertRows()
+
+        # Invalidate highlight cache for this node
+        self._highlight_cache.pop(path, None)
 
 
 

@@ -824,6 +824,27 @@ if GUI_AVAILABLE:
             """)
             button_layout.addWidget(refresh_btn)
 
+            # Reload Config button
+            reload_config_btn = QPushButton("Reload Config")
+            reload_config_btn.clicked.connect(self.reload_vista_config)
+            reload_config_btn.setToolTip("Reload vista_casino.yaml without restarting\n"
+                                          "Note: Re-run 'Gather Selected' to apply new keywords to existing runs")
+            reload_config_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {Colors.SECONDARY_GRAY};
+                    color: white;
+                    padding: 6px 12px;
+                    border: 1px solid {Colors.BORDER_GRAY};
+                    font-size: 11px;
+                    font-weight: normal;
+                }}
+                QPushButton:hover {{
+                    background-color: #5A6268;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
+                }}
+            """)
+            button_layout.addWidget(reload_config_btn)
+
             # Create Chart/Table button
             if MATPLOTLIB_AVAILABLE:
                 chart_table_btn = QPushButton("Create Chart/Table")
@@ -3138,6 +3159,73 @@ if GUI_AVAILABLE:
                     else:
                         return default
             return default
+
+        def reload_vista_config(self):
+            """Reload vista_casino.yaml at runtime without restarting the application."""
+            from ..core.config import load_config
+            import os
+
+            # Resolve the config file path
+            config_file = self.analyzer.config_file
+            if config_file is None:
+                config_file = os.path.join(os.getenv('casino_pond', ''), 'vista_casino.yaml')
+
+            try:
+                new_config = load_config(config_file)
+            except FileNotFoundError:
+                QMessageBox.critical(self, "Reload Failed",
+                                     f"Config file not found:\n{config_file}")
+                return
+            except Exception as e:
+                QMessageBox.critical(self, "Reload Failed",
+                                     f"Failed to parse config:\n{str(e)}")
+                return
+
+            # Count task changes for the warning message
+            old_tasks = set(self.analyzer.config.get('tasks', {}).keys())
+            new_tasks = set(new_config.get('tasks', {}).keys())
+            added = new_tasks - old_tasks
+            removed = old_tasks - new_tasks
+
+            # Apply new config to analyzer
+            self.analyzer.config = new_config
+
+            # Refresh task combo (repopulate from new config)
+            current_task = self.task_combo.currentText()
+            self.task_combo.blockSignals(True)
+            self.task_combo.clear()
+            self.task_combo.addItems(["all"] + list(new_config.get('tasks', {}).keys()))
+            idx = self.task_combo.findText(current_task)
+            self.task_combo.setCurrentIndex(idx if idx >= 0 else 0)
+            self.task_combo.blockSignals(False)
+
+            # Refresh keyword groups from updated YAML
+            self.load_yaml_config_and_group_keywords()
+
+            # Rebuild table columns and rows (runs_data is preserved)
+            self.rebuild_table_with_view_mode()
+
+            # Status bar summary
+            self.status_bar.showMessage(
+                f"Config reloaded: {len(new_tasks)} tasks | "
+                f"+{len(added)} added, -{len(removed)} removed | {config_file}"
+            )
+
+            # Inform user if tasks changed (re-gather needed for new columns)
+            if added or removed:
+                msg_parts = [f"Config reloaded from:\n{config_file}"]
+                if added:
+                    msg_parts.append(
+                        f"New keywords/tasks added ({len(added)}):\n"
+                        + ", ".join(sorted(added)) +
+                        "\n\n→ Click 'Gather Selected' to populate new columns for existing runs."
+                    )
+                if removed:
+                    msg_parts.append(
+                        f"Keywords/tasks removed ({len(removed)}):\n"
+                        + ", ".join(sorted(removed))
+                    )
+                QMessageBox.information(self, "Config Reloaded", "\n\n".join(msg_parts))
 
         def refresh_analysis(self):
             """Refresh analysis data while preserving filter state"""

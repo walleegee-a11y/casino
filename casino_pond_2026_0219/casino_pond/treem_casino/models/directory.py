@@ -109,6 +109,7 @@ class DirectoryHierarchy:
     children: Dict[Path, 'DirectoryHierarchy'] = field(default_factory=dict)
     depth: int = 0
     max_depth: int = 6
+    is_shallow: bool = False  # True if scan stopped here — children may exist on disk
 
     @classmethod
     def from_path(
