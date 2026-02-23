@@ -672,7 +672,7 @@ class MainWindow(QMainWindow):
         # If this was a shallow initial scan, kick off silent background scan for depths 4-6
         if hierarchy.calculate_max_depth() < self.config.ui.max_directory_depth:
             base_path = Path(self.base_dir_input.text().strip())
-            self.status_widget.set_help_text("Scanning depth 4-6 in background...")
+            self.status_widget.start_blinking("Scanning depth 4~6 in background...")
             QTimer.singleShot(500, lambda: self.directory_service.scan_background_deep_async(base_path))
 
     def save_expand_state(self) -> set:

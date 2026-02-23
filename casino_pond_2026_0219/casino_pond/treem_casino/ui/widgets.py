@@ -543,6 +543,10 @@ class StatusWidget(QWidget):
     def __init__(self, config: AppConfig, parent=None):
         super().__init__(parent)
         self.config = config
+        self._blink_state = True
+        self._blink_timer = QTimer(self)
+        self._blink_timer.setInterval(config.ui.blink_interval)  # 500 ms
+        self._blink_timer.timeout.connect(self._toggle_blink)
         self.setup_ui()
 
     def setup_ui(self):
@@ -551,9 +555,7 @@ class StatusWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         # Help label
-        self.help_label = QLabel(
-            ""
-        )
+        self.help_label = QLabel("")
         self.help_label.setFont(QFont(*self.config.fonts.get_font_tuple(8)))
         self.help_label.setStyleSheet(f"color: {self.config.colors.olive_green};")
         self.help_label.setWordWrap(True)
@@ -568,12 +570,28 @@ class StatusWidget(QWidget):
         layout.addWidget(self.help_label, stretch=1)
         layout.addWidget(self.depth_label, stretch=0)
 
+    def _toggle_blink(self):
+        """Alternate label color to create blink effect."""
+        self._blink_state = not self._blink_state
+        color = self.config.colors.burnt_sienna if self._blink_state else self.config.colors.background
+        self.help_label.setStyleSheet(f"color: {color};")
+
+    def start_blinking(self, text: str):
+        """Show text with blinking color effect (busy indicator)."""
+        self._blink_state = True
+        self.help_label.setText(text)
+        self.help_label.setStyleSheet(f"color: {self.config.colors.burnt_sienna};")
+        self._blink_timer.start()
+
     def update_depth_status(self, current_depth: int, max_depth: int):
         """Update depth status display."""
         self.depth_label.setText(f"(current depth : {current_depth} / {max_depth})")
 
     def set_help_text(self, text: str):
-        """Set help text."""
+        """Set help text and stop any active blinking."""
+        self._blink_timer.stop()
+        self._blink_state = True
+        self.help_label.setStyleSheet(f"color: {self.config.colors.olive_green};")
         self.help_label.setText(text)
 
 
