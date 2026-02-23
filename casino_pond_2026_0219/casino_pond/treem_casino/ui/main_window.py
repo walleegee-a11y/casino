@@ -724,9 +724,9 @@ class MainWindow(QMainWindow):
         if header:
             from PyQt5.QtWidgets import QHeaderView
             header.setStretchLastSection(False)
-            header.setSectionResizeMode(0, QHeaderView.Stretch)       # Name stretches
-            header.setSectionResizeMode(1, QHeaderView.Interactive)   # Modified adjustable
-            header.resizeSection(1, 130)  # Modified default width
+            header.setSectionResizeMode(0, QHeaderView.Stretch)       # Directories: auto-fills remaining width
+            header.setSectionResizeMode(1, QHeaderView.Interactive)   # Modified: drag right edge to resize
+            header.resizeSection(1, 120)  # Modified minimal default
 
         self.apply_highlighting()
 

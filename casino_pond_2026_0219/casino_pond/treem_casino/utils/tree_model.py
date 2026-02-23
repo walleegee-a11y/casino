@@ -239,14 +239,14 @@ class DirectoryTreeModel(QAbstractItemModel):
 
             # Column 1 (Modified): use smaller font, no special styling
             if index.column() > 0:
-                font.setPointSize(font.pointSize() - 1)
+                font.setPointSize(font.pointSize() - 3)
                 return font
 
             item_text = item.data(0) or ""
 
             # Check if this item has memo text (contains " : ")
             if " : " in item_text:
-                font.setPointSize(font.pointSize() - 1)
+                font.setPointSize(font.pointSize() - 2)
                 font.setItalic(True)
                 return font
 
@@ -346,6 +346,10 @@ class DirectoryTreeModel(QAbstractItemModel):
             headers = ["Directories", "Modified"]
             if 0 <= section < len(headers):
                 return headers[section]
+        if orientation == Qt.Horizontal and role == Qt.FontRole:
+            font = QFont(*self.config.fonts.get_font_tuple())
+            font.setBold(False)
+            return font
         return QVariant()
 
     def index(self, row: int, column: int, parent: QModelIndex = QModelIndex()) -> QModelIndex:
