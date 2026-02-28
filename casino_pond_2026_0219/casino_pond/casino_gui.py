@@ -1,5 +1,6 @@
 #!/usr/local/bin/python3.12 -u
 
+import json
 import os
 import re
 import subprocess
@@ -8,8 +9,9 @@ import yaml
 from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
                              QPushButton, QTextEdit, QLineEdit, QLabel, QMessageBox,
                              QSplitter, QShortcut, QDialog, QFormLayout, QDialogButtonBox,
-                             QCheckBox, QComboBox, QTabWidget, QScrollArea, QGroupBox)
-from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer
+                             QCheckBox, QComboBox, QTabWidget, QScrollArea, QGroupBox,
+                             QTableWidget, QTableWidgetItem, QHeaderView, QSizePolicy)
+from PyQt5.QtCore import Qt, QPropertyAnimation, QEasingCurve, QThread, pyqtSignal, QTimer, QTime
 from PyQt5.QtGui import QFont, QColor, QKeySequence
 from prettytable import PrettyTable
 from PyQt5 import QtWidgets, QtCore, QtGui
@@ -158,12 +160,17 @@ class CommandExecutionThread(QThread):
     output_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
     task_done_signal = pyqtSignal(str)
+    # Flow monitoring signals
+    flow_start_signal = pyqtSignal(str, str)          # flow_id, flow_name
+    task_status_signal = pyqtSignal(str, str, str, str)  # flow_id, task_name, status, time
+    flow_done_signal = pyqtSignal(str, str, int, int)    # flow_id, flow_name, succeeded, failed
 
     def __init__(self, command, manager_name):
         super().__init__()
         self.command = command
         self.manager_name = manager_name
         self.process = None
+        self.captured_run_dir = None
 
     def run(self):
         try:
@@ -233,6 +240,27 @@ class CommandExecutionThread(QThread):
                     break
 
                 if output:
+                    if output.startswith("CASINO_RUN_DIR: "):
+                        self.captured_run_dir = output[len("CASINO_RUN_DIR: "):].strip()
+                    elif output.startswith("CASINO_FLOW_START: "):
+                        p = output[len("CASINO_FLOW_START: "):].strip().split("|")
+                        if len(p) >= 2:
+                            self.flow_start_signal.emit(p[0], p[1])
+                    elif output.startswith("CASINO_TASK_START: "):
+                        p = output[len("CASINO_TASK_START: "):].strip().split("|")
+                        if len(p) >= 2:
+                            self.task_status_signal.emit(p[0], p[1], "RUNNING", p[3] if len(p) > 3 else "")
+                    elif output.startswith("CASINO_TASK_STATUS: "):
+                        p = output[len("CASINO_TASK_STATUS: "):].strip().split("|")
+                        if len(p) >= 3:
+                            self.task_status_signal.emit(p[0], p[1], p[2], p[3] if len(p) > 3 else "")
+                    elif output.startswith("CASINO_FLOW_DONE: "):
+                        p = output[len("CASINO_FLOW_DONE: "):].strip().split("|")
+                        if len(p) >= 4:
+                            try:
+                                self.flow_done_signal.emit(p[0], p[0].rsplit("_", 1)[0], int(p[2]), int(p[3]))
+                            except (ValueError, IndexError):
+                                pass
                     if "Press 'y' to continue with the execution" in output:
                         if '-y' in self.command:
                             self.process.stdin.write('y\n')
@@ -1231,6 +1259,265 @@ class DirectoryTracerWrapper(QWidget):
             # Return environment base as fallback
             return os.getenv('casino_prj_base', os.getcwd())
 
+    def schedule_navigation(self, path_str: str):
+        """Ask the tree manager to navigate to path after the next scan completes."""
+        self.main_window.schedule_navigation(path_str)
+
+class FlowStatusWidget(QWidget):
+    """Per-flow task status table — one instance per active flow tab."""
+
+    COL_TASK, COL_STATUS, COL_START, COL_RUNTIME = 0, 1, 2, 3
+
+    STATUS_COLORS = {
+        "RUNNING":     "#d4a017",   # amber
+        "SUCCESS":     "#2e8b57",   # sea green
+        "FAILED":      "#cc3333",   # red
+        "INTERRUPTED": "#888888",   # gray
+        "PENDING":     "#555555",   # dark gray
+    }
+
+    def __init__(self, panel: 'FlowMonitorPanel' = None, kill_callback=None):
+        super().__init__(panel)
+        self._panel = panel
+        self._kill_callback = kill_callback
+        self._task_rows = {}        # task_name -> row index
+        self._start_times = {}      # task_name -> QTime
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick_runtimes)
+        self._timer.start(1000)
+        self._setup_ui()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        # Inner header: command label + kill + close
+        hdr = QHBoxLayout()
+        hdr.setContentsMargins(4, 2, 4, 2)
+        self._cmd_label = QLabel("─")
+        self._cmd_label.setFont(QFont("Terminus", 7))
+        self._cmd_label.setStyleSheet("color: #888888;")
+        hdr.addWidget(self._cmd_label, stretch=1)
+
+        self._kill_btn = QPushButton("Kill")
+        self._kill_btn.setFont(QFont("Terminus", 7))
+        self._kill_btn.setFixedHeight(18)
+        self._kill_btn.setFixedWidth(38)
+        self._kill_btn.setStyleSheet(
+            "QPushButton { background: #8b1a1a; color: #ffcccc; border: 1px solid #cc3333; border-radius: 2px; }"
+            "QPushButton:hover { background: #cc3333; color: white; }"
+            "QPushButton:disabled { background: #2a2a2a; color: #555; border-color: #444; }"
+        )
+        self._kill_btn.clicked.connect(self._confirm_kill)
+        hdr.addWidget(self._kill_btn)
+
+        close_btn = QPushButton("x")
+        close_btn.setFont(QFont("Terminus", 7))
+        close_btn.setFixedHeight(18)
+        close_btn.setFixedWidth(22)
+        close_btn.setStyleSheet(
+            "QPushButton { background: #333355; color: #9dced0; border: 1px solid #444466; border-radius: 2px; }"
+            "QPushButton:hover { background: #555577; color: white; }"
+        )
+        close_btn.clicked.connect(self._close_tab)
+        hdr.addWidget(close_btn)
+        layout.addLayout(hdr)
+
+        self.table = QTableWidget(0, 4, self)
+        self.table.setHorizontalHeaderLabels(["Task", "Status", "Start", "Runtime"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeToContents)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionMode(QTableWidget.SingleSelection)
+        self.table.setAlternatingRowColors(True)
+        self.table.setFont(QFont("Terminus", 8))
+        self.table.horizontalHeader().setFont(QFont("Terminus", 8))
+        self.table.setStyleSheet("""
+            QTableWidget { background: #1a1a2e; color: #d0d0d0; gridline-color: #333355; }
+            QTableWidget::item:alternate { background: #16213e; }
+            QHeaderView::section { background: #0f3460; color: #e0e0e0; padding: 2px 4px; }
+        """)
+        layout.addWidget(self.table)
+
+    def update_task(self, task_name: str, status: str, time_str: str):
+        """Add or update a task row. Called from main thread via signal."""
+        if task_name not in self._task_rows:
+            row = self.table.rowCount()
+            self.table.insertRow(row)
+            self._task_rows[task_name] = row
+            self.table.setItem(row, self.COL_TASK, QTableWidgetItem(task_name))
+            self.table.setItem(row, self.COL_STATUS, QTableWidgetItem(""))
+            self.table.setItem(row, self.COL_START, QTableWidgetItem(""))
+            self.table.setItem(row, self.COL_RUNTIME, QTableWidgetItem(""))
+
+        row = self._task_rows[task_name]
+        status_key = status.upper() if status.upper() in self.STATUS_COLORS else "PENDING"
+        color = self.STATUS_COLORS[status_key]
+
+        label = {"RUNNING": "> Running", "SUCCESS": "* Done",
+                 "FAILED": "X Failed", "INTERRUPTED": "- Stop"}.get(status_key, status)
+
+        item = QTableWidgetItem(label)
+        item.setForeground(QColor(color))
+        self.table.setItem(row, self.COL_STATUS, item)
+
+        if status_key == "RUNNING":
+            display_time = time_str.split(" ")[-1] if time_str else ""
+            self.table.item(row, self.COL_START).setText(display_time)
+            self._start_times[task_name] = QTime.currentTime()
+        elif task_name in self._start_times:
+            elapsed = self._start_times[task_name].secsTo(QTime.currentTime())
+            self.table.item(row, self.COL_RUNTIME).setText(self._fmt_elapsed(elapsed))
+
+    def _tick_runtimes(self):
+        for task_name, start_qt in self._start_times.items():
+            row = self._task_rows.get(task_name)
+            if row is None:
+                continue
+            status_item = self.table.item(row, self.COL_STATUS)
+            if status_item and "Running" in status_item.text():
+                elapsed = start_qt.secsTo(QTime.currentTime())
+                rt_item = self.table.item(row, self.COL_RUNTIME)
+                if rt_item:
+                    rt_item.setText(self._fmt_elapsed(elapsed))
+
+    @staticmethod
+    def _fmt_elapsed(secs: int) -> str:
+        h, rem = divmod(secs, 3600)
+        m, s = divmod(rem, 60)
+        return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+
+    def set_command(self, command: str):
+        short = command if len(command) <= 90 else command[:87] + "..."
+        self._cmd_label.setText(short)
+        self._cmd_label.setToolTip(command)
+
+    def mark_finished(self):
+        self._kill_btn.setEnabled(False)
+
+    def _confirm_kill(self):
+        reply = QMessageBox.question(
+            self, "Kill Process",
+            "Kill the running flow process?\nAll tasks currently in progress will be terminated.",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        if reply == QMessageBox.Yes and self._kill_callback:
+            self._kill_callback()
+
+    def _close_tab(self):
+        if self._panel is not None:
+            idx = self._panel.tabs.indexOf(self)
+            if idx >= 0:
+                self._panel.tabs.removeTab(idx)
+
+
+class FlowMonitorPanel(QWidget):
+    """QTabWidget container — one tab per concurrent flow run."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._flow_widgets = {}   # flow_id -> FlowStatusWidget
+        self._splitter_ref = None  # QSplitter set by CasinoGUI
+        self._expanded_size = 180  # remembered height before collapse
+        self._setup_ui()
+
+    def set_splitter(self, splitter):
+        """Register the parent QSplitter so _toggle can use setSizes()."""
+        self._splitter_ref = splitter
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 0)
+        layout.setSpacing(0)
+
+        # Header row: label + toggle button
+        hdr = QHBoxLayout()
+        lbl = QLabel("Flow Monitor")
+        lbl.setFont(QFont("Terminus", 8))
+        lbl.setStyleSheet("color: #9dced0; font-weight: bold;")
+        hdr.addWidget(lbl)
+        hdr.addStretch()
+        self._toggle_btn = QPushButton("[^] hide")
+        self._toggle_btn.setFont(QFont("Terminus", 7))
+        self._toggle_btn.setFixedHeight(16)
+        self._toggle_btn.setStyleSheet("QPushButton { background: transparent; color: #9dced0; border: none; }")
+        self._toggle_btn.clicked.connect(self._toggle)
+        hdr.addWidget(self._toggle_btn)
+        layout.addLayout(hdr)
+
+        self.tabs = QTabWidget(self)
+        self.tabs.setTabsClosable(False)
+        self.tabs.setFont(QFont("Terminus", 8))
+        self.tabs.setStyleSheet("""
+            QTabWidget::pane { background: #1a1a2e; border: 1px solid #333355; }
+            QTabBar::tab { background: #0f3460; color: #c0c0c0; padding: 2px 8px; min-width: 100px; }
+            QTabBar::tab:selected { background: #16213e; color: #9dced0; }
+        """)
+        layout.addWidget(self.tabs)
+
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
+    def _toggle(self):
+        visible = self.tabs.isVisible()
+        self.tabs.setVisible(not visible)
+        self._toggle_btn.setText("[v] show" if visible else "[^] hide")
+        if self._splitter_ref is not None:
+            idx = self._splitter_ref.indexOf(self)
+            sizes = list(self._splitter_ref.sizes())
+            total = sum(sizes)
+            if visible:  # collapsing — snap to header height
+                self._expanded_size = max(sizes[idx], 100)
+                sizes[idx] = 26
+                sizes[1 - idx] = total - 26
+            else:         # expanding — restore previous size
+                exp = max(self._expanded_size, 130)
+                sizes[idx] = exp
+                sizes[1 - idx] = max(total - exp, 50)
+            self._splitter_ref.setSizes(sizes)
+        else:
+            # Fallback when not inside a splitter
+            if visible:
+                self.setFixedHeight(26)
+            else:
+                self.setMinimumHeight(130)
+                self.setMaximumHeight(16777215)
+            self.updateGeometry()
+
+    def add_flow_tab(self, flow_id: str, flow_name: str, command: str = "", kill_callback=None):
+        """Create a new tab for a flow run. Safe to call from main thread via signal."""
+        if flow_id in self._flow_widgets:
+            return
+        widget = FlowStatusWidget(panel=self, kill_callback=kill_callback)
+        widget.set_command(command)
+        self._flow_widgets[flow_id] = widget
+        self.tabs.addTab(widget, flow_name)
+        self.tabs.setCurrentWidget(widget)
+        if not self.tabs.isVisible():
+            self._toggle()
+
+    def route_task_update(self, flow_id: str, task_name: str, status: str, time_str: str):
+        """Route a task status update to the correct tab's widget."""
+        widget = self._flow_widgets.get(flow_id)
+        if widget:
+            widget.update_task(task_name, status, time_str)
+
+    def finish_flow_tab(self, flow_id: str, flow_name: str, succeeded: int, failed: int):
+        """Update tab title when flow completes."""
+        widget = self._flow_widgets.get(flow_id)
+        if not widget:
+            return
+        idx = self.tabs.indexOf(widget)
+        if idx >= 0:
+            icon = "[OK]" if failed == 0 else f"[{failed}]"
+            self.tabs.setTabText(idx, f"{flow_name} {icon}")
+        widget.mark_finished()
+
+
 class CasinoGUI(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
@@ -1308,6 +1595,11 @@ class CasinoGUI(QtWidgets.QWidget):
         self.flow_task_names = set()
         self.command_thread = None
         self.active_threads = {}
+
+        # Restore persisted flow_mgr command history
+        saved_history = self._load_flow_history()
+        if saved_history:
+            self.input_field.command_histories["flow_mgr"] = saved_history
 
     def load_user_hotkeys(self):
         """Load user-defined hotkeys from a configuration file or use defaults"""
@@ -1543,11 +1835,31 @@ class CasinoGUI(QtWidgets.QWidget):
         """Create the middle pane containing console and input field"""
         console_pane = QWidget()
         console_layout = QVBoxLayout(console_pane)
+        console_layout.setContentsMargins(0, 0, 0, 0)
+        console_layout.setSpacing(0)
+
+        # Vertical splitter: console output (top) resizable vs flow monitor (bottom)
+        self.console_splitter = QSplitter(Qt.Vertical)
+        self.console_splitter.setHandleWidth(4)
 
         self.console_output = QTextEdit(self)
         self.console_output.setReadOnly(True)
         self.console_output.setFont(QFont("Terminus", 8))
-        console_layout.addWidget(self.console_output)
+        self.console_splitter.addWidget(self.console_output)
+
+        # Flow monitor panel — shown only when flow_mgr is active
+        self.flow_monitor = FlowMonitorPanel(self)
+        self.flow_monitor.setVisible(False)
+        self.console_splitter.addWidget(self.flow_monitor)
+        self.flow_monitor.set_splitter(self.console_splitter)
+
+        # Console gets all stretch; flow monitor starts collapsed
+        self.console_splitter.setStretchFactor(0, 1)
+        self.console_splitter.setStretchFactor(1, 0)
+        self.console_splitter.setCollapsible(0, False)
+        self.console_splitter.setCollapsible(1, True)
+
+        console_layout.addWidget(self.console_splitter)
 
         self.input_box_layout = QHBoxLayout()
         self.input_label = QLabel("Command-line args / User Input:")
@@ -1960,6 +2272,34 @@ class CasinoGUI(QtWidgets.QWidget):
         self.command_thread.output_signal.connect(self.update_console_output)
         self.command_thread.error_signal.connect(self.handle_execution_error)
         self.command_thread.task_done_signal.connect(self.notify_task_done)
+
+        if self.selected_manager[0] == 'flow_mgr':
+            self.flow_monitor.setVisible(True)
+            # Give flow monitor ~180px on first show; user can resize from there
+            total = self.console_splitter.height()
+            if total > 0:
+                self.console_splitter.setSizes([max(total - 180, 60), 180])
+            _thread = self.command_thread
+            _cmd = full_command
+            def _kill_cb(_t=_thread):
+                import signal as _signal
+                proc = getattr(_t, 'process', None)
+                if proc:
+                    try:
+                        # Kill entire process group so gnome-terminal children die too
+                        os.killpg(os.getpgid(proc.pid), _signal.SIGTERM)
+                    except Exception:
+                        try:
+                            proc.kill()
+                        except Exception:
+                            pass
+            self.command_thread.flow_start_signal.connect(
+                lambda fid, fname, cmd=_cmd, cb=_kill_cb:
+                    self.flow_monitor.add_flow_tab(fid, fname, cmd, cb)
+            )
+            self.command_thread.task_status_signal.connect(self.flow_monitor.route_task_update)
+            self.command_thread.flow_done_signal.connect(self.flow_monitor.finish_flow_tab)
+
         self.command_thread.start()
 
         if self.selected_manager[0] not in self.active_threads:
@@ -2006,6 +2346,8 @@ class CasinoGUI(QtWidgets.QWidget):
                     self.manager_command_histories[manager_name].append(user_input)
 
                 self.input_field.add_to_history(user_input)
+                if manager_name == "flow_mgr":
+                    self._save_flow_history()
 
             if hasattr(self, 'waiting_for_arguments') and self.waiting_for_arguments:
                 self.execute_manager(self.selected_manager[1], user_input)
@@ -2042,6 +2384,11 @@ class CasinoGUI(QtWidgets.QWidget):
 
         if manager_name in self.active_threads:
             self.active_threads[manager_name] = [t for t in self.active_threads[manager_name] if t.isRunning()]
+
+        # Auto-navigate tree manager when a workspace run dir was created
+        run_dir = getattr(self.command_thread, 'captured_run_dir', None)
+        if run_dir:
+            self.directory_tracer_app.schedule_navigation(run_dir)
 
         button = self.manager_buttons.get(manager_name)
         if button:
@@ -2118,6 +2465,34 @@ class CasinoGUI(QtWidgets.QWidget):
         elif isinstance(data, list):
             for item in data:
                 self.extract_task_names(item)
+
+    # ------------------------------------------------------------------
+    # flow_mgr command-history persistence
+    # ------------------------------------------------------------------
+    def _flow_history_path(self) -> str:
+        username = os.getenv("USER", os.getenv("USERNAME", "unknown"))
+        return os.path.expanduser(f"~/.flow_manager_cmd_history_{username}.json")
+
+    def _load_flow_history(self) -> list:
+        path = self._flow_history_path()
+        try:
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    return [str(x) for x in data]
+        except Exception as e:
+            print(f"[flow history] load error: {e}")
+        return []
+
+    def _save_flow_history(self):
+        path = self._flow_history_path()
+        history = self.input_field.command_histories.get("flow_mgr", [])
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(history, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            print(f"[flow history] save error: {e}")
 
     def closeEvent(self, event):
         """Handle window close event"""

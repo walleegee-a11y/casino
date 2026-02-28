@@ -170,7 +170,10 @@ Path(RUNS_HISTORY_DIR).mkdir(exist_ok=True)
 interrupted = False
 current_process = None
 monitor_process = None
+active_task_processes = []   # list of (process, pid_file, task_name) — all running tasks
 execution_id = str(int(time.time()))  # Unique execution ID
+flow_id = f"{Path(args.flow).stem}_{execution_id}"   # Unique per flow run
+flow_name = Path(args.flow).stem
 
 # File paths for keeping track of tasks and runtimes - EXECUTION-SPECIFIC
 COMPLETED_TASKS_FILE = os.path.join(RUNS_HISTORY_DIR, f'completed_tasks___{filename_suffix}_{execution_id}.yaml')
@@ -387,19 +390,33 @@ def cleanup_temp_files():
             print(f"Cleanup warning: {e}")
 
 def handle_interruption(signum, frame):
-    global interrupted, current_process, monitor_process
+    global interrupted, current_process, monitor_process, active_task_processes
     interrupted = True
-    print(f"\nReceived signal {signum}. Cleaning up and stopping execution...")
+    print(f"\nReceived signal {signum}. Stopping all tasks...")
 
-    # Clean up temp files
-    cleanup_temp_files()
+    # Emit INTERRUPTED markers BEFORE cleanup so the GUI updates task rows
+    for _term_proc, _pid_file, task_name in list(active_task_processes):
+        print(f"CASINO_TASK_STATUS: {flow_id}|{task_name}|INTERRUPTED|{get_current_time()}", flush=True)
 
+    # Kill every tracked task: terminal process + pid-file process (gnome-terminal-server children)
+    for term_proc, pid_file, task_name in list(active_task_processes):
+        cleanup_task_processes(term_proc, pid_file, task_name)
+    active_task_processes.clear()
+
+    # Fallback: also terminate the single current_process reference (belt-and-suspenders)
     if current_process is not None:
-        current_process.terminate()
+        try:
+            current_process.terminate()
+        except Exception:
+            pass
 
     if monitor_process:
-        print("Task monitor will continue running. You can close it manually when done.")
-        print("Monitor PID:", monitor_process.pid)
+        try:
+            monitor_process.terminate()
+        except Exception:
+            pass
+
+    cleanup_temp_files()
 
 signal.signal(signal.SIGTERM, handle_interruption)
 signal.signal(signal.SIGHUP, handle_interruption)
@@ -1010,9 +1027,11 @@ exit $exit_code
             working_directory=current_dir
         )
 
+        print(f"CASINO_TASK_START: {flow_id}|{task['name']}|{task_id}|{get_current_time()}", flush=True)
         process = subprocess.Popen(terminal_cmd, env=os.environ.copy())
         global current_process
         current_process = process
+        active_task_processes.append((process, pid_file, task['name']))
 
         # Use Option 1: Process tree monitoring
         status = monitor_with_process_tree_csh(
@@ -1020,6 +1039,8 @@ exit $exit_code
         )
 
         current_process = None
+        # Remove completed task from active list
+        active_task_processes[:] = [e for e in active_task_processes if e[0] is not process]
 
         # Handle specific status cases
         if status == "Success":
@@ -1131,12 +1152,15 @@ def monitor_with_process_tree_csh(process, status_file, pid_file, task_name, max
                         if status_content == "RUNNING":
                             print(f"Task {task_name} is running...")
                         elif status_content.startswith('SUCCESS'):
+                            print(f"CASINO_TASK_STATUS: {flow_id}|{task_name}|SUCCESS|{get_current_time()}", flush=True)
                             print(f"Task {task_name} completed successfully")
                             return "Success"
                         elif status_content.startswith('FAILED'):
+                            print(f"CASINO_TASK_STATUS: {flow_id}|{task_name}|FAILED|{get_current_time()}", flush=True)
                             print(f"Task {task_name} failed")
                             return "Failed"
                         elif status_content == "INTERRUPTED":
+                            print(f"CASINO_TASK_STATUS: {flow_id}|{task_name}|INTERRUPTED|{get_current_time()}", flush=True)
                             print(f"Task {task_name} was interrupted")
                             return "Interrupted"
                         last_status = status_content
@@ -1676,6 +1700,7 @@ exit $exit_code
             os.remove(script_path)
             return start_time_str, get_current_time(), "00:00:00:01", "Interrupted"
 
+        print(f"CASINO_TASK_START: {flow_id}|{task['name']}|{task_id}|{get_current_time()}", flush=True)
         # Execute directly with csh (no xterm wrapper for single terminal mode)
         if args.interactive:
             # Interactive mode: inherit stdin/stdout/stderr for real-time interaction
@@ -1829,6 +1854,7 @@ exit $exit_code
                 pass
 
         print(f"Task '{task['name']}' completed with status: {final_status}")
+        print(f"CASINO_TASK_STATUS: {flow_id}|{task['name']}|{final_status}|{get_current_time()}", flush=True)
         print(f"Runtime: {runtime_str}")
 
         return start_time_str, end_time_str, runtime_str, final_status
@@ -1936,6 +1962,7 @@ def execute_tasks_single_terminal(task_graph, execution_order):
         print("Execution was interrupted before starting tasks.")
         return runtimes
 
+    print(f"CASINO_FLOW_START: {flow_id}|{flow_name}|{get_current_time()}", flush=True)
     print("=" * 70)
     print("CASINO FLOW MANAGER - SINGLE TERMINAL MODE")
     print("=" * 70)
@@ -1988,6 +2015,9 @@ def execute_tasks_single_terminal(task_graph, execution_order):
         if status == "Interrupted" or interrupted:
             print("Task execution was interrupted.")
 
+        _succeeded = sum(1 for r in runtimes if r.get('status') == 'Success')
+        _failed = sum(1 for r in runtimes if r.get('status') in ('Failed', 'Timeout'))
+        print(f"CASINO_FLOW_DONE: {flow_id}|{len(runtimes)}|{_succeeded}|{_failed}|{get_current_time()}", flush=True)
         return runtimes
 
     # Sequential execution for multiple tasks
@@ -2044,6 +2074,9 @@ def execute_tasks_single_terminal(task_graph, execution_order):
             print("Task execution was interrupted. Stopping execution.")
             break
 
+    _succeeded = sum(1 for r in runtimes if r.get('status') == 'Success')
+    _failed = sum(1 for r in runtimes if r.get('status') in ('Failed', 'Timeout'))
+    print(f"CASINO_FLOW_DONE: {flow_id}|{len(runtimes)}|{_succeeded}|{_failed}|{get_current_time()}", flush=True)
     return runtimes
 
 def execute_tasks_with_constraints(task_graph, execution_order):
@@ -2055,6 +2088,8 @@ def execute_tasks_with_constraints(task_graph, execution_order):
     if interrupted:
         print("Execution was interrupted before starting tasks.")
         return runtimes
+
+    print(f"CASINO_FLOW_START: {flow_id}|{flow_name}|{get_current_time()}", flush=True)
 
     # For single task execution (-only option)
     if args.only:
@@ -2088,6 +2123,9 @@ def execute_tasks_with_constraints(task_graph, execution_order):
         if status == "Interrupted" or interrupted:
             print("Task execution was interrupted.")
 
+        _succeeded = sum(1 for r in runtimes if r.get('status') == 'Success')
+        _failed = sum(1 for r in runtimes if r.get('status') in ('Failed', 'Timeout'))
+        print(f"CASINO_FLOW_DONE: {flow_id}|{len(runtimes)}|{_succeeded}|{_failed}|{get_current_time()}", flush=True)
         return runtimes
 
     # Sequential execution for dependency-based tasks (no parallel execution)
@@ -2183,6 +2221,9 @@ def execute_tasks_with_constraints(task_graph, execution_order):
 
     print("\nExecution Summary:")
     print(summary_table)
+    _succeeded = sum(1 for r in runtimes if r.get('status') == 'Success')
+    _failed = sum(1 for r in runtimes if r.get('status') in ('Failed', 'Timeout'))
+    print(f"CASINO_FLOW_DONE: {flow_id}|{len(runtimes)}|{_succeeded}|{_failed}|{get_current_time()}", flush=True)
     return runtimes
 
 def build_graph_and_in_degree(tasks):
