@@ -167,15 +167,25 @@ class HistoryNavigationWidget(QWidget):
             print("DEBUG: Failed to jump to entry")
 
     def show_history_dialog(self):
-        """Show full history dialog with terminal support."""
+        """Show full history dialog as non-modal so both windows are usable."""
         print("DEBUG: Showing history dialog")
-        dialog = HistoryViewerDialog(self.config, self.history_service, self)
 
-        # FIXED: Get main window and connect directly to open_terminal_at_path
+        # Raise existing dialog if already open
+        if hasattr(self, '_history_dialog') and self._history_dialog and self._history_dialog.isVisible():
+            self._history_dialog.raise_()
+            self._history_dialog.activateWindow()
+            return
+
+        dialog = HistoryViewerDialog(self.config, self.history_service, self)
+        dialog.setWindowModality(Qt.NonModal)
+
+        # Keep reference to prevent garbage collection
+        self._history_dialog = dialog
+
+        # Get main window and connect directly to open_terminal_at_path
         main_window = None
         parent = self.parent()
         while parent:
-            # Check if this is the main window by class name
             if parent.__class__.__name__ == 'MainWindow':
                 main_window = parent
                 break
@@ -187,11 +197,10 @@ class HistoryNavigationWidget(QWidget):
         else:
             print("ERROR: Could not find main window or open_terminal_at_path method")
 
-        if dialog.exec_() == dialog.Accepted:
-            selected_entry = dialog.get_selected_entry()
-            if selected_entry:
-                print(f"DEBUG: Selected entry from dialog: {selected_entry.path}")
-                self.jump_to_entry(selected_entry)
+        # Navigate without closing: connect Go button signal directly
+        dialog.navigate_entry_requested.connect(self.jump_to_entry)
+
+        dialog.show()
 
     def update_button_states(self):
         """Update back/forward button states."""
@@ -248,6 +257,8 @@ class HistoryViewerDialog(QDialog):
 
     # Signal for opening terminal
     open_terminal_requested = pyqtSignal(Path)
+    # Signal for navigating to selected entry (without closing dialog)
+    navigate_entry_requested = pyqtSignal(object)
 
     def __init__(self, config: AppConfig, history_service: DirectoryHistoryService, parent=None):
         super().__init__(parent)
@@ -306,18 +317,20 @@ class HistoryViewerDialog(QDialog):
 
         self.go_button = QPushButton("Go to Selected")
         self.go_button.setEnabled(False)
-        button_box.addButton(self.go_button, QDialogButtonBox.AcceptRole)
+        button_box.addButton(self.go_button, QDialogButtonBox.ActionRole)
 
         self.clear_button = QPushButton("Clear History")
         button_box.addButton(self.clear_button, QDialogButtonBox.ResetRole)
 
         close_button = button_box.addButton(QDialogButtonBox.Close)
 
-        button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
 
         # Connect clear button directly
         self.clear_button.clicked.connect(self.clear_history)
+
+        # Go button navigates without closing the dialog
+        self.go_button.clicked.connect(self.go_to_selected)
 
         layout.addWidget(button_box)
 
@@ -525,6 +538,12 @@ class HistoryViewerDialog(QDialog):
             self.details_text.clear()
             self.go_button.setEnabled(False)
 
+    def go_to_selected(self):
+        """Navigate to selected entry without closing the dialog."""
+        if self.selected_entry:
+            print(f"DEBUG: Go to selected (no close): {self.selected_entry.path}")
+            self.navigate_entry_requested.emit(self.selected_entry)
+
     def get_selected_entry(self) -> Optional[HistoryEntry]:
         """Get the selected history entry."""
         return self.selected_entry
@@ -655,15 +674,12 @@ class QuickHistoryWidget(QWidget):
                     target_path = dest_path
 
         elif entry.operation == "trash":
-            trash_path = entry.path.parent / "TrashBin"
-            if trash_path.exists():
-                target_path = trash_path
+            # entry.path is the exact trashed item in TrashBin (or TrashBin itself)
+            target_path = entry.path
 
         elif entry.operation == "restore":
-            if "TrashBin" in str(entry.path):
-                restored_location = entry.path.parent.parent
-                if restored_location.exists():
-                    target_path = restored_location
+            # entry.path is the exact restored item at its destination (or destination dir)
+            target_path = entry.path
 
         elif entry.operation == "create_run":
             if entry.details and "Created run directory:" in entry.details:

@@ -1,0 +1,67 @@
+
+setAnalysisMode -analysisType onChipVariation
+setAnalysisMode -aocv true
+setAnalysisMode -cppr both
+setAnalysisMode -usefulSkew true
+
+setDelayCalMode -engine aae
+setDelayCalMode -accurate_receiver_out_load true 
+setDelayCalMode -advanced_pincap_mode true
+setDelayCalMode -combine_mmmc early_late
+setDelayCalMode -enable_high_accuracy_mode true
+setDelayCalMode -eng_enableCheckTC true
+setDelayCalMode -enable_high_fanout false
+setDelayCalMode -equivalent_waveform_model_si_threshold 0.1
+setDelayCalMode -siMode opt_signoff
+setDelayCalMode -enable_estimate_slew true
+setDelayCalMode -enable_quiet_receivers_for_hold true
+setDelayCalMode -equivalent_waveform_model propagation
+setDelayCalMode -ewm_type simulation
+setDelayCalMode -SIAware true
+
+setSIMode -attacker_alignment timing_aware_edge
+setSIMode -enable_logical_correlation true
+setSIMode -separate_delta_delay_on_data true
+setSIMode -si_reselection slack
+setSIMode -accumulated_small_attacker_threshold 10
+setSIMode -individual_attacker_threshold 0.015
+setSIMode -unconstrained_net_use_inf_tw false
+setSIMode -delta_delay_annotation_mode lumpedOnNet
+setSIMode -enable_drv_with_delta_slew true
+setSIMode -report_si_slew_max_transition true
+setSIMode -enable_glitch_report true
+
+set_global report_precision 3 
+set_global report_timing_format "timing_point cell fanout total_derate load slew incr_delay delay arrival"
+set_table_style -no_frame_fix_width -nosplit
+set timing_report_enable_cppr_point true
+set timing_report_enable_skew_in_reports true
+set timing_report_enable_auto_column_width true
+
+#set_global timing_enable_aocv_accurate_mode true
+#set_global timing_enable_path_exception_to_pin_compatibility false
+set_global timing_aocv_derate_mode aocv_additive
+set_global timing_aocv_analysis_mode combine_launch_capture
+set_global timing_aocv_use_cell_depth_for_net true
+set_global timing_enable_spatial_derate_mode true
+set_global timing_spatial_derate_distance_mode bounding_box
+set_global timing_report_enable_verbose_ssta_mode true
+set_global _timing_enable_parallel_arcs_reduction true
+set_global _timing_enable_parallel_check_arc_merging true
+set _timing_enable_first_mt_end_tag true
+set timing_enable_backward_compatible_mt_endtag_mode false
+set timing_report_use_receiver_model_capacitance true
+set_global timing_cppr_threshold_ps 5
+set_global timing_remove_clock_reconvergence_pessimism true
+set_global timing_disable_drv_reports_on_constant_nets true
+set_global timing_enable_backward_compatible_write_timing_windows_flow false
+set_global timing_library_clipped_waveform_below_threshold true
+set_global timing_library_mt_mmmc_flow true
+set_global timing_report_unconstrained_paths true
+set_global timing_apply_default_primary_input_assertion false
+set_global timing_extract_model_non_borrowing_latch_path_as_setup true
+set_global timing_disable_constant_propagation_for_sequential_cells true
+set_global timing_disable_retime_clock_path_slew_propagation false
+
+setExtractRCMode -relative_c_th 0.01 -coupling_c_th 1.0 -total_c_th 0
+setExtractRCMode -effortLevel medium

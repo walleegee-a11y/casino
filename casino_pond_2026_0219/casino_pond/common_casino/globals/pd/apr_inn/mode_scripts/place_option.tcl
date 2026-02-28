@@ -1,0 +1,30 @@
+
+setPlaceMode -checkSameNetCellAbut true
+setPlaceMode -place_detail_legalization_inst_gap 2
+setPlaceMode -place_detail_max_shifter_depth 25
+setLimitedAccessFeature innovusSKPTimingEffortHigh true
+setPlaceMode -place_global_timing_effort high
+setPlaceMode -place_global_cong_effort high
+
+setPlaceMode -place_detail_use_check_drc false 
+setPlaceMode -place_global_routing_blockage_aware true
+setPlaceMode -place_global_module_aware_spare true
+setPlaceMode -place_detail_preroute_as_obs {}
+setPlaceMode -place_global_clock_gate_aware true
+setPlaceMode -place_global_clock_power_driven true
+setPlaceMode -place_global_clock_power_driven_effort high
+setPlaceMode -RTCSpread false
+setPlaceMode -place_global_place_io_pins false
+
+setPlaceMode -place_global_exp_allow_missing_scan_chain true
+setPlaceMode -place_global_ignore_scan false
+setPlaceMode -place_global_reorder_scan false
+
+setPlaceMode -place_opt_save_db true
+
+setRouteMode -earlyGlobalMaxRouteLayer 6
+setRouteMode -earlyGlobalMinRouteLayer 2
+setRouteMode -earlyGlobalHonorClockSpecNDR true
+setRouteMode -earlyGlobalNumTracksPerClockWire 4
+setRouteMode -earlyGlobalRouteSecondPG true -earlyGlobalSecondPGMaxFanout 4
+

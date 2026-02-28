@@ -401,24 +401,40 @@ class DirectoryHistoryService(QObject):
         self.add_entry(run_path, "navigate")
 
     def add_trash_operation(self, paths: List[Path], trash_path: Path):
-        """Add trash operation entry."""
-        details = f"Moved {len(paths)} items to trash"
-        # Add entry for the parent directory where items were moved from
-        if paths:
-            self.add_entry(paths[0].parent, "trash", details)
-        # Add navigation to trash bin
-        self.add_entry(trash_path, "navigate")
+        """Add trash operation entry pointing to the exact trashed item in TrashBin."""
+        if not paths:
+            return
+        item_names = [p.name for p in paths]
+        name_list = ', '.join(item_names[:3])
+        if len(paths) > 3:
+            name_list += f" and {len(paths) - 3} more"
+        details = f"Trashed: {name_list} | from: {paths[0].parent.name}"
+
+        # Navigate to exact item in TrashBin (single) or TrashBin itself (multiple)
+        if len(paths) == 1:
+            nav_target = trash_path / paths[0].name
+        else:
+            nav_target = trash_path
+        self.add_entry(nav_target, "trash", details)
 
     def add_restore_operation(self, paths: List[Path]):
-        """Add restore operation entry."""
-        details = f"Restored {len(paths)} items from trash"
-        if paths:
-            # Add entry for trash bin
-            trash_bin = paths[0].parent
-            self.add_entry(trash_bin, "restore", details)
-            # Add navigation to restored location
-            restored_location = trash_bin.parent
-            self.add_entry(restored_location, "navigate")
+        """Add restore operation entry pointing to the exact restored destination."""
+        if not paths:
+            return
+        # paths are TrashBin locations; actual destination is TrashBin.parent/name
+        dest_parent = paths[0].parent.parent
+        item_names = [p.name for p in paths]
+        name_list = ', '.join(item_names[:3])
+        if len(paths) > 3:
+            name_list += f" and {len(paths) - 3} more"
+        details = f"Restored: {name_list} | to: {dest_parent.name}"
+
+        # Navigate to exact restored item (single) or destination dir (multiple)
+        if len(paths) == 1:
+            nav_target = dest_parent / paths[0].name
+        else:
+            nav_target = dest_parent
+        self.add_entry(nav_target, "restore", details)
 
     def add_delete_operation(self, paths: List[Path]):
         """Add delete operation entry with specific directory names."""

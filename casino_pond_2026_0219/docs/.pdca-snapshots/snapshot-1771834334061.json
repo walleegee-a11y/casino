@@ -1,0 +1,649 @@
+{
+  "timestamp": "2026-02-23T08:12:14.060Z",
+  "reason": "compaction",
+  "status": {
+    "version": "2.0",
+    "lastUpdated": "2026-02-23T00:05:42.870Z",
+    "activeFeatures": [
+      "gui",
+      "treem_casino",
+      "ui"
+    ],
+    "primaryFeature": "gui",
+    "features": {
+      "gui": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-02-20T13:02:32.855Z",
+          "lastUpdated": "2026-02-21T05:10:05.639Z"
+        },
+        "lastFile": "d:\\CASINO\\casino_pond_2026_0219\\casino_pond\\hawkeye_casino\\gui\\dashboard.py"
+      },
+      "treem_casino": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-02-22T10:07:00.134Z",
+          "lastUpdated": "2026-02-23T00:05:42.870Z"
+        },
+        "lastFile": "d:\\CASINO\\casino_pond_2026_0219\\casino_pond\\treem_casino\\utils\\tree_model.py"
+      },
+      "ui": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-02-22T10:09:21.897Z",
+          "lastUpdated": "2026-02-22T23:57:30.090Z"
+        },
+        "lastFile": "d:\\CASINO\\casino_pond_2026_0219\\casino_pond\\treem_casino\\ui\\main_window.py"
+      }
+    },
+    "pipeline": {
+      "currentPhase": 1,
+      "level": "Dynamic",
+      "phaseHistory": []
+    },
+    "session": {
+      "startedAt": "2026-02-18T19:31:42.568Z",
+      "onboardingCompleted": false,
+      "lastActivity": "2026-02-23T00:05:42.870Z"
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-20T13:02:32.856Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:02:38.651Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:20:37.049Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:20:43.289Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:20:48.540Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:37:32.893Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:37:42.798Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:37:54.623Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:38:12.587Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:38:18.012Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:43:08.863Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:43:22.276Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:43:34.913Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:43:49.085Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:44:04.187Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-21T05:09:42.518Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-21T05:10:05.639Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:07:00.134Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:07:07.653Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:07:14.508Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:07:28.680Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:07:42.442Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:07:49.698Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:07:58.548Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:08:10.919Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:08:22.654Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:08:40.814Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:08:53.108Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:09:00.936Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:09:21.897Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:09:30.715Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:09:49.485Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:10:03.158Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:10:08.063Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:10:15.920Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:10:22.147Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:10:29.045Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:10:38.110Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:10:46.358Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:11:15.053Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:11:21.682Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:11:30.910Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:11:43.269Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:11:51.263Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:11:59.698Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:12:06.867Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:12:13.342Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:12:21.300Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:12:34.551Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:12:45.106Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:12:57.129Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:13:03.125Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:13:09.642Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:13:27.324Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:13:34.127Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:13:44.405Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:13:52.682Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:14:05.543Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:14:12.797Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:14:24.380Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:14:36.429Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:15:23.579Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:33:27.596Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:33:37.400Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:33:43.669Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:33:48.186Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:33:53.346Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:33:58.808Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:34:04.461Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:34:12.449Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:34:18.924Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:34:29.291Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:34:35.933Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:34:52.205Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:34:58.373Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:35:13.845Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:35:21.724Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:35:36.347Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:35:44.189Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:35:51.715Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:35:57.912Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:36:03.982Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:36:10.792Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T10:36:17.796Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T11:31:40.782Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T11:31:45.911Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T11:31:51.805Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T11:31:56.794Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T11:32:05.424Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T23:28:11.913Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T23:48:25.154Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T23:52:01.266Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T23:54:51.994Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-22T23:57:30.090Z",
+        "feature": "ui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-23T00:01:03.523Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-23T00:05:35.545Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-23T00:05:42.870Z",
+        "feature": "treem_casino",
+        "phase": "do",
+        "action": "updated"
+      }
+    ]
+  }
+}

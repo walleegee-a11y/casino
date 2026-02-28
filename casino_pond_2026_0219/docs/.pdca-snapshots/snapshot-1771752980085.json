@@ -1,0 +1,141 @@
+{
+  "timestamp": "2026-02-22T09:36:20.084Z",
+  "reason": "compaction",
+  "status": {
+    "version": "2.0",
+    "lastUpdated": "2026-02-21T05:10:05.639Z",
+    "activeFeatures": [
+      "gui"
+    ],
+    "primaryFeature": "gui",
+    "features": {
+      "gui": {
+        "phase": "do",
+        "phaseNumber": 3,
+        "matchRate": null,
+        "iterationCount": 0,
+        "requirements": [],
+        "documents": {},
+        "timestamps": {
+          "started": "2026-02-20T13:02:32.855Z",
+          "lastUpdated": "2026-02-21T05:10:05.639Z"
+        },
+        "lastFile": "d:\\CASINO\\casino_pond_2026_0219\\casino_pond\\hawkeye_casino\\gui\\dashboard.py"
+      }
+    },
+    "pipeline": {
+      "currentPhase": 1,
+      "level": "Dynamic",
+      "phaseHistory": []
+    },
+    "session": {
+      "startedAt": "2026-02-18T19:31:42.568Z",
+      "onboardingCompleted": false,
+      "lastActivity": "2026-02-21T05:10:05.639Z"
+    },
+    "history": [
+      {
+        "timestamp": "2026-02-20T13:02:32.856Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:02:38.651Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:20:37.049Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:20:43.289Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:20:48.540Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:37:32.893Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:37:42.798Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:37:54.623Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:38:12.587Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:38:18.012Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:43:08.863Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:43:22.276Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:43:34.913Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:43:49.085Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-20T13:44:04.187Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-21T05:09:42.518Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      },
+      {
+        "timestamp": "2026-02-21T05:10:05.639Z",
+        "feature": "gui",
+        "phase": "do",
+        "action": "updated"
+      }
+    ]
+  }
+}

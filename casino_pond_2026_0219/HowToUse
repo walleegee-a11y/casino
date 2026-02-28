@@ -1,0 +1,49 @@
+
+0. add below on your ~/.cshrc
+setenv LD_LIBRARY_PATH "/usr/lib:/lib:/usr/local/lib"
+set path = ($path /bin \
+            /usr/bin \
+            /usr/local \
+            /usr/local/bin \
+            /etc \
+            /usr/etc \
+            /sbin \
+            . \
+           )
+
+##################################
+# env   (casino/alias-csh)       #
+##################################
+alias csnprj    'echo "# prj_base : going to $prj_base " ; cd $prj_base'
+alias csnmain   '$casino_pond/casino.py'
+alias csntm     '$casino_pond/tm_casino.py'
+alias csndkm    '$casino_pond/dkm_casino.py'
+alias csnfm     '$casino_pond/fm_casino.py'
+alias csnwsm    '$casino_pond/wsm_casino.py'
+alias csnwsnv   '$casino_pond/wsnv_casino.py'
+alias csntree   '$casino_pond/treem_casino.py'
+alias csn       'source $casino_pond/../:casino.csh' ; # CASINO text mode
+alias csngui    '$casino_pond/casino_gui.py'         ; # CASINO gui mode
+
+
+1. Once you copy casino locally, run :mod_env.csh to modify some vars accordingly.
+    > cp -rf /mnt/data/prjs/CASINO/Release/11_20240923 <Your Local Path>
+    > cd <Your Local Path>
+    > :mod_env.csh
+
+2. Source CASINO config
+
+    > source casino_pond/config_casino.csh
+ 
+3. Run CASINO
+
+    # text mode
+    > source :casino.csh
+    or
+    > csn
+
+    # gui mode
+    > casino_pond/casino_gui.py
+    or
+    > csngui
+

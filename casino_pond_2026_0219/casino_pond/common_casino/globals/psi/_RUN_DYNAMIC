@@ -1,0 +1,162 @@
+#! /bin/csh -f
+
+
+set signoff_corner = "ss_0p72v_p125c_cmax"
+set DK_VER = "dc-0.0_dk-0.0_tag-0.0"
+set ref_RH_tech = "G-RPT-EHV22N-1P8M2A-GENERIC_TOTEM-EM-CMAX-1.0-P1_20240913_A002_Evaluation_only.tech"
+set ref_RHEM_tech = ""
+set layout_tech_lef = "22nm_EHV_8m0t2a.lef"
+
+#Design Info
+set freq = "333e6"
+set data_toggle = "0.08"
+set clock_toggle = "2"
+set VDD_INFO = "VDDL 0.72"
+set VSS_INFO = "VSSL 0"
+
+
+set signoff_P =  `echo $signoff_corner | awk -F_ '{print $(NF-3)}'`
+set signoff_V =  `echo $signoff_corner | awk -F_ '{print $(NF-2)}'`
+set signoff_T =  `echo $signoff_corner | awk -F_ '{print $(NF-1)}'`
+set signoff_RC = `echo $signoff_corner | awk -F_ '{print $(NF)}'`
+set current_path = `pwd`
+set tag_inn = `echo $current_path | awk -F/ '{print $(NF-3)}'`
+set run_inn = `echo $current_path | awk -F/ '{print $(NF-1)}'`
+set top_name = `echo $current_path | awk -F/ '{print $(NF-4)}'`
+set base_path = `echo $current_path | awk -F "/works_" '{print $1}'`
+set tag_pi = `echo $tag_inn | sed 's/^pd___/pi___/'`
+
+
+
+set ref_pdk_path = "$base_path/db/vers/${DK_VER}/pdk"
+set pnr_def = ${top_name}.def.gz
+set pnr_spef = ${top_name}.spef.${signoff_T}_${signoff_RC}.gz
+set pt_timingfile = ${top_name}.twf.gz
+set ref_lef = "$base_path/db/vers/${DK_VER}/*/lef"
+set ref_lib = "$base_path/db/vers/${DK_VER}/*/lib/${signoff_P}_${signoff_V}_${signoff_T}"
+set ref_apl = "$base_path/db/vers/${DK_VER}/*/apl/${signoff_P}_${signoff_V}_${signoff_T}"
+set ref_gds2def = "$base_path/db/vers/${DK_VER}/mem/gds2def"
+set outfeedDirName = "${base_path}/outfeeds/${top_name}/${tag_inn}/${run_inn}"
+set piDirName = "${base_path}/outfeeds/${top_name}/${tag_pi}/${run_inn}"
+
+
+
+
+
+
+while (! -e ${outfeedDirName}/innovus.done && -e ${piDirName}/tw_file/export.done && -e ${outfeedDirName}/SMC.done)
+
+    echo "Wating for P&R GDS & Timing file & SPEF file"
+    echo "Wating file :${outfeedDirName}/innovus.done "
+    echo "Wating file :${piDirName}/tw_file/export.done "
+    echo "Wating file :${outfeedDirName}/SMC.done"
+    sleep 60
+end
+
+
+
+#--------------------------------------------------------------------------------Copy RULE Script
+    mkdir -p dynamic
+    \cp -rf ${ref_pdk_path}/psi_runset/dynamic/* dynamic
+#------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------Go Pv
+    cd dynamic
+#------------------------------------------------------------------------------------------------
+
+
+#--------------------------------------------------------------------------------Update Rule Deck ENV
+
+###DK
+
+    #RH Tech
+    echo "TECH_FILE ${ref_pdk_path}/redhawk_tech/${ref_RH_tech}" > dk.include
+
+    #RH EM Tech
+    if ("$ref_RHEM_tech" != "") then
+        echo "EM_TECH_FILE ${ref_pdk_path}/redhawk_tech/${ref_RHEM_tech} " >> dk.include
+    else
+        echo "# EM_TECH_FILE " >> dk.include
+    endif
+
+    #LEF
+    set lef_list = (`ls ${ref_lef}/*`)
+    set tech_list = (`ls ${ref_pdk_path}/inno_tech/*/${layout_tech_lef}`)
+    echo "LEF_FILES {" >> dk.include
+    echo "$tech_list ${lef_list}" | tr ' ' '\n' >> dk.include
+    echo "}" >> dk.include
+    
+    #LIB
+    set lib_list = (`ls ${ref_lib}/*`) 
+    echo "LIB_FILES {" >> dk.include
+    echo "${lib_list}" | tr ' ' '\n' >> dk.include 
+    echo "custom.lib custom" >> dk.include 
+    echo "}" >> dk.include 
+
+
+    #APL
+    set apl_list = (`ls ${ref_apl}/*`) 
+    echo "APL_FILES {" >> dk.include
+
+    foreach type ($apl_list:q)
+        if ($type =~ "*.spiprof") then
+            echo "$type current" >> dk.include
+        else if ($type =~ "*.cdev") then
+            echo "$type cdev" >> dk.include
+        else if ($type =~ "*.avm") then
+            echo "$type avm" >> dk.include
+        endif
+    end
+
+    echo "}" >> dk.include 
+
+    #GDS2DEF ##########Need To Syntex #####
+    if (-e ${ref_gds2def}/gds2def.done) then
+        set gds2def_list = (`ls ${ref_gds2def}/*`)
+        echo "GDS_CELLS {" >> dk.include
+        echo "${gds2def_list}" | tr ' ' '\n' >> dk.include
+        echo "}" >> dk.include
+    else
+        echo "#GDS_CELLS {" >> dk.include
+        echo "# }" >> dk.include
+    endif
+
+
+###DB
+    #DEF
+        echo "DEF_FILES {" > db.include
+        echo "${outfeedDirName}/def/${pnr_def} top" >> db.include
+        echo "}" >> db.include
+        sed -i 's|DEF_FILES.*|DEF_FILES { '${outfeedDirName}'/def/'${pnr_def}' top }|g' static.gsr
+    
+    #SPEF
+        echo "CELL_RC_FILE {" >> db.include
+        echo "${top_name} ${outfeedDirName}/spef/${pnr_spef}" >> db.include
+        echo "}" >> db.include
+
+    #TIMING
+        echo "STA_FILE {" >> db.include
+        echo "${top_name} ${piDirName}/tw_file/${top_name}.${signoff_P}_${signoff_V}_${signoff_T}_${signoff_RC}_hold.func.timing" >> db.include
+        echo "FREQ_OF_MISSING_INSTANCES ${freq}" >> db.include
+        echo "}" >> db.include
+
+###User Option
+
+    #FREQ 
+    echo "FREQ ${freq}" > user.include
+    echo "TOGGLE_RATE ${data_toggle} ${clock_toggle}" >> user.include
+    echo "VDD_NETS {" >> user.include
+    echo "${VDD_INFO}" >> user.include
+    echo "}" >> user.include
+    echo "GND_NETS {" >> user.include
+    echo "${VSS_INFO}" >> user.include
+    echo "}" >> user.include
+#------------------------------------------------------------------------------------------
+
+
+#---------------------------------------------------------------------------------Excute Run
+source :run
+#------------------------------------------------------------------------------------------
+
+
+exit

@@ -1,0 +1,50 @@
+$prj
+
+    - FastTrack
+    - outfeeds
+        -- $all_blks
+        -- ___BLK_INFO___
+
+    - works_$whoami
+        -- $top_name
+            --- $ws
+                ---- common
+                     ----- flow
+                     ----- user_define
+                     ----- checkup
+                     ----- globals
+                           ------ pi
+                           ------ pd
+                           ------ pex
+                           ------ pv
+                           ------ psi
+                ---- runs
+                     ----- $run_ver
+                           ------ common
+                                  ------- flow
+                                  ------- user_define
+                                  ------- checkup
+                                  ------- globals
+                                          -------- pi
+                                          -------- pd
+                                          -------- pex
+                                          -------- pv
+                                          -------- psi
+# pi - start
+                           ------ syn_dc
+                           ------ dft
+                           ------ lec_fm
+                           ------ sta_pt
+                                  ------- dmsa
+                           ------ ldrc_dc
+                           ------ vclp
+                           ------ sim
+# pi - end
+# pd - start
+                           ------ apr_inn
+                           ------ apr_icc2
+                           ------ pex
+                           ------ pv
+                           ------ psi
+                           ------ bump
+# pd - end
