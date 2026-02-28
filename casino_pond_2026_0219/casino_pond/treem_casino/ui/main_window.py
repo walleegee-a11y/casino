@@ -11,7 +11,7 @@ from datetime import datetime
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QPushButton,
     QLineEdit, QLabel, QApplication, QMessageBox, QMenu, QAction,
-    QInputDialog
+    QInputDialog, QAbstractItemView
 )
 from PyQt5.QtCore import Qt, pyqtSlot, QTimer, QModelIndex, QFileSystemWatcher
 from PyQt5.QtGui import QFont, QKeySequence, QClipboard
@@ -25,7 +25,7 @@ from ..services.change_detection_service import ChangeDetectionService, Director
 from ..ui.widgets import (
     EnhancedTreeView, BlinkingDelegate, ProgressWidget,
     MemoDialog, MemoViewerDialog, StatusWidget, FilterControlWidget,
-    DepthControlWidget, ConfirmationDialog, UpdatedDirectoriesWidget
+    DepthControlWidget, ConfirmationDialog
 )
 from ..ui.history_widgets import HistoryNavigationWidget, QuickHistoryWidget
 from ..utils.tree_model import DirectoryTreeModel
@@ -55,14 +55,18 @@ class MainWindow(QMainWindow):
         self.blinking_delegate: Optional[BlinkingDelegate] = None
         self.history_navigation: Optional[HistoryNavigationWidget] = None
         self.quick_history: Optional[QuickHistoryWidget] = None
-        self.updated_dirs_widget: Optional[UpdatedDirectoriesWidget] = None
-
         # State
         self.current_hierarchy: Optional[DirectoryHierarchy] = None
         self.current_filter = DirectoryFilter()
         self.current_depth = 0
         self.max_depth = 0
         self.programmatic_navigation = False
+        self._pending_nav_path: Optional[Path] = None
+
+        # Shallow expansion queue — limits concurrent subtree scan threads
+        self._shallow_queue: List[Path] = []
+        self._shallow_queue_depth: int = 3
+        self._MAX_CONCURRENT_SUBTREE = 8
 
         # Auto-refresh filesystem watcher
         self.fs_watcher: Optional[QFileSystemWatcher] = None
@@ -96,15 +100,42 @@ class MainWindow(QMainWindow):
         # Base directory input
         input_layout = QHBoxLayout()
 
-        base_dir_label = QLabel("Base Directory:")
+        # Current user (bold, top-left)
+        user_label = QLabel(f"User : {getpass.getuser()}")
+        user_font = QFont(*self.config.fonts.get_font_tuple())
+        user_font.setBold(True)
+        user_label.setFont(user_font)
+        user_label.setStyleSheet("color: #1a6bc4;")
+        input_layout.addWidget(user_label)
+
+        input_layout.addSpacing(12)
+
+        base_dir_label = QLabel("Base:")
         base_dir_label.setFont(QFont(*self.config.fonts.get_font_tuple()))
         input_layout.addWidget(base_dir_label)
 
         self.base_dir_input = QLineEdit(str(self.config.paths.base_directory))
         self.base_dir_input.setFont(QFont(*self.config.fonts.get_font_tuple(8)))
+        self.base_dir_input.setReadOnly(True)
+        self.base_dir_input.setStyleSheet("color: #888888; background-color: #eeeeee;")
         input_layout.addWidget(self.base_dir_input)
 
         main_layout.addLayout(input_layout)
+
+        # Go-to navigation input — only scrolls/selects within the tree, never rescans
+        goto_layout = QHBoxLayout()
+        goto_label = QLabel("Go to:")
+        goto_label.setFont(QFont(*self.config.fonts.get_font_tuple()))
+        goto_layout.addWidget(goto_label)
+
+        self.goto_input = QLineEdit()
+        self.goto_input.setFont(QFont(*self.config.fonts.get_font_tuple(8)))
+        self.goto_input.setPlaceholderText("Type a path under base dir and press Enter")
+        self.goto_input.setClearButtonEnabled(True)
+        self.goto_input.returnPressed.connect(self.go_to_directory)
+        goto_layout.addWidget(self.goto_input)
+
+        main_layout.addLayout(goto_layout)
 
         # History navigation
         self.history_navigation = HistoryNavigationWidget(self.config, self.history_service)
@@ -147,10 +178,6 @@ class MainWindow(QMainWindow):
         # Quick history widget
         self.quick_history = QuickHistoryWidget(self.config, self.history_service)
         main_layout.addWidget(self.quick_history)
-
-        # Updated directories widget
-        self.updated_dirs_widget = UpdatedDirectoriesWidget(self.config)
-        main_layout.addWidget(self.updated_dirs_widget)
 
         # Status widget
         self.status_widget = StatusWidget(self.config)
@@ -312,8 +339,6 @@ class MainWindow(QMainWindow):
 
         # Change detection connections
         self.change_service.changes_detected.connect(self.on_changes_detected)
-        self.updated_dirs_widget.navigate_requested.connect(self.navigate_to_path_from_update)
-        self.updated_dirs_widget.cleared.connect(self.on_updates_cleared)
 
         # History service signals
         self.history_service.history_changed.connect(self.update_history_button_states)
@@ -353,10 +378,6 @@ class MainWindow(QMainWindow):
             # Ctrl+H for history
             self.addAction(self.create_action("Show History", QKeySequence("Ctrl+H"),
                                             lambda: self.history_navigation.show_history_dialog()))
-
-            # ESC for clearing updates
-            self.addAction(self.create_action("Clear Updates", QKeySequence(Qt.Key_Escape),
-                                             lambda: self.updated_dirs_widget.clear_updates() if self.updated_dirs_widget.has_updates() else None))
 
             # Ctrl+1 through Ctrl+5 for depth navigation
             self.addAction(self.create_action("Set Depth 0", QKeySequence("Ctrl+0"), lambda: self.set_depth_level(0)))
@@ -461,6 +482,48 @@ class MainWindow(QMainWindow):
         initial_depth = min(self.config.ui.initial_scan_depth, self.config.ui.max_directory_depth)
         self.directory_service.scan_directory_async(base_path, fast_mode=True, max_depth=initial_depth)
 
+    def schedule_navigation(self, path_str: str):
+        """Store a pending navigation path and trigger refresh to load newly-created dirs.
+
+        Navigation fires in _on_subtree_scan_completed once depth 4-6 are fully loaded.
+        """
+        self._pending_nav_path = Path(path_str)
+        self.programmatic_navigation = True
+        self.refresh_directory_tree()
+
+    def go_to_directory(self):
+        """Navigate to the path typed in the Go-to input (within the tree only).
+
+        Never changes the base directory or triggers a rescan.
+        Rejects any path outside the current base directory.
+        """
+        path_str = self.goto_input.text().strip()
+        if not path_str:
+            return
+
+        target = Path(path_str)
+        base_dir = Path(self.base_dir_input.text())
+
+        # Enforce: must stay within base directory
+        try:
+            target.relative_to(base_dir)
+        except ValueError:
+            self.show_status_message(
+                f"Path must be under base: {base_dir.name}", 3000)
+            return
+
+        # Find in tree and scroll to it — no rescan, no base-dir change
+        if self.tree_model:
+            idx = self.tree_model.find_path_index(target)
+            if idx and idx.isValid():
+                self.tree_view.setCurrentIndex(idx)
+                self.tree_view.scrollTo(idx, QAbstractItemView.PositionAtCenter)
+                self.tree_view.expand(idx)
+                self.show_status_message(f"Navigated to: {target.name}", 2000)
+            else:
+                self.show_status_message(
+                    f"Not found in tree: {target.name}", 3000)
+
     def go_back(self):
         """Go back in history."""
         print(f"DEBUG: go_back called, can_go_back={self.history_service.can_go_back()}")
@@ -521,26 +584,6 @@ class MainWindow(QMainWindow):
         finally:
             self.programmatic_navigation = False
 
-    @pyqtSlot(Path)
-    def navigate_to_path_from_update(self, path: Path):
-        """Navigate to an updated directory."""
-        self.programmatic_navigation = True
-        try:
-            current_base = Path(self.base_dir_input.text())
-
-            try:
-                path.relative_to(current_base)
-                self.navigate_to_directory(str(path))
-            except ValueError:
-                base_path = self.find_base_path_for_target(path)
-                if base_path and base_path != current_base:
-                    self.base_dir_input.setText(str(base_path))
-                    self.refresh_directory_tree()
-                    QTimer.singleShot(1000, lambda: self.navigate_to_directory(str(path)))
-                else:
-                    self.navigate_to_directory(str(path))
-        finally:
-            self.programmatic_navigation = False
 
     def find_base_path_for_target(self, target_path: Path) -> Optional[Path]:
         """Find appropriate base directory that contains the target path."""
@@ -587,7 +630,6 @@ class MainWindow(QMainWindow):
 
         if updated_paths:
             logger.info(f"Detected {len(updated_paths)} updated directories")
-            self.updated_dirs_widget.set_updated_directories(updated_paths)
 
             change_types = {}
             for change in changes:
@@ -596,18 +638,16 @@ class MainWindow(QMainWindow):
             summary = ", ".join([f"{count} {ctype}" for ctype, count in change_types.items()])
             self.show_status_message(f"Updates detected: {summary}", 5000)
 
-    @pyqtSlot()
-    def on_updates_cleared(self):
-        """Handle when user clears the updates widget."""
-        logger.info("Updated directories cleared by user")
-        self.show_status_message("Updates cleared", 2000)
-
     # AUTO-REFRESH FILESYSTEM WATCHER
 
     def _setup_fs_watcher(self):
         """Setup QFileSystemWatcher on base directory for auto-refresh."""
         base_path = self.base_dir_input.text().strip()
         if not base_path:
+            return
+
+        # Already watching this base path — skip rebuild
+        if self.fs_watcher and base_path in (self.fs_watcher.directories() or []):
             return
 
         # Remove old watcher if any
@@ -634,6 +674,10 @@ class MainWindow(QMainWindow):
     def _on_fs_directory_changed(self, path: str):
         """Handle filesystem change — debounce to avoid rapid-fire rescans."""
         logger.info(f"Filesystem change detected: {path}")
+        # Skip if a scan is already running — it will capture the new state
+        scanner = self.directory_service._scanner
+        if scanner and scanner.isRunning():
+            return
         # Reset debounce timer (restarts the 1s countdown)
         self._fs_debounce_timer.start()
 
@@ -669,11 +713,24 @@ class MainWindow(QMainWindow):
         # Setup filesystem watcher on base directory for auto-refresh
         self._setup_fs_watcher()
 
-        # If this was a shallow initial scan, kick off silent background scan for depths 4-6
+        # If initial scan was shallow, expand only the leaf nodes that need it —
+        # avoids re-scanning depths 0-3 (the main performance saving)
         if hierarchy.calculate_max_depth() < self.config.ui.max_directory_depth:
-            base_path = Path(self.base_dir_input.text().strip())
-            self.status_widget.start_blinking("Scanning depth 4~6 in background...")
-            QTimer.singleShot(500, lambda: self.directory_service.scan_background_deep_async(base_path))
+            shallow_paths = hierarchy.collect_shallow_leaves()
+            if shallow_paths:
+                remaining_depth = (self.config.ui.max_directory_depth
+                                   - self.config.ui.initial_scan_depth)
+                self._shallow_queue = list(shallow_paths)
+                self._shallow_queue_depth = remaining_depth
+                blink_msg = f"Expanding {len(shallow_paths)} dirs (depth 4~6)..."
+                self.status_widget.start_blinking(blink_msg)
+                QTimer.singleShot(300, self._drain_shallow_queue)
+
+        # If no shallow expansion queued, navigate to pending path immediately
+        if self._pending_nav_path and not self._shallow_queue:
+            pending = self._pending_nav_path
+            self._pending_nav_path = None
+            QTimer.singleShot(100, lambda: self.navigate_to_directory(str(pending)))
 
     def save_expand_state(self) -> set:
         """Save currently expanded paths from tree view."""
@@ -842,7 +899,7 @@ class MainWindow(QMainWindow):
         """Handle progress updates - use bottom progress bar for scanning."""
         if ("Scanning" in message or "directory" in message.lower() or
             "scan" in message.lower() or "Starting" in message):
-            self.scan_progress_bar.show_progress("", progress)
+            self.scan_progress_bar.show_progress(message, progress)
             if progress >= 100:
                 QTimer.singleShot(1500, self.scan_progress_bar.hide_progress)
         else:
@@ -865,14 +922,43 @@ class MainWindow(QMainWindow):
         # Scan one level at a time — user sees children appear and can keep going deeper
         self.directory_service.scan_subtree_async(hierarchy.root.path, additional_depth=1)
 
+    def _drain_shallow_queue(self):
+        """Launch up to _MAX_CONCURRENT_SUBTREE subtree scans from the queue."""
+        active = len(self.directory_service._subtree_scanners)
+        while self._shallow_queue and active < self._MAX_CONCURRENT_SUBTREE:
+            path = self._shallow_queue.pop(0)
+            self.directory_service.scan_subtree_async(
+                path, additional_depth=self._shallow_queue_depth)
+            active += 1
+
     def _on_subtree_scan_completed(self, path, new_hierarchy):
         """Merge completed on-demand subtree scan into the model without full rebuild."""
+        from pathlib import Path as _Path
+        actual_path = _Path(path) if isinstance(path, str) else path
+
+        # Patch the canonical current_hierarchy so that update_tree_view()
+        # (triggered by filter/sort toggles) rebuilds with full depth data,
+        # not just the initial 3-level shallow scan.
+        if self.current_hierarchy:
+            node = self.current_hierarchy.find_directory(actual_path)
+            if node:
+                node.children = new_hierarchy.children
+                node.is_shallow = False
+
         if self.tree_model:
-            from pathlib import Path as _Path
-            self.tree_model.update_subtree(
-                _Path(path) if isinstance(path, str) else path,
-                new_hierarchy
-            )
+            self.tree_model.update_subtree(actual_path, new_hierarchy)
+
+        # Drain next batch from the shallow expansion queue
+        self._drain_shallow_queue()
+        # Stop blinking once all background expansions are fully done
+        if not self.directory_service._subtree_scanners and not self._shallow_queue:
+            self.status_widget.set_help_text("")
+            self.show_status_message("Tree fully loaded", 2000)
+            # Navigate to pending path (set by schedule_navigation) now that depth 4-6 are loaded
+            if self._pending_nav_path:
+                pending = self._pending_nav_path
+                self._pending_nav_path = None
+                QTimer.singleShot(100, lambda: self.navigate_to_directory(str(pending)))
 
     @pyqtSlot(object)
     def _on_background_scan_completed(self, hierarchy: DirectoryHierarchy):
@@ -1483,8 +1569,5 @@ class MainWindow(QMainWindow):
             self.go_back()
         elif event.key() == Qt.Key_Right and event.modifiers() == Qt.AltModifier:
             self.go_forward()
-        elif event.key() == Qt.Key_Escape:
-            if self.updated_dirs_widget.has_updates():
-                self.updated_dirs_widget.clear_updates()
         else:
             super().keyPressEvent(event)

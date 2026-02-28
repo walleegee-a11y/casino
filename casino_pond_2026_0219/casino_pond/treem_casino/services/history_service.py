@@ -387,9 +387,9 @@ class DirectoryHistoryService(QObject):
         self.add_entry(path, "terminal", details)
 
     def add_clone_operation(self, source_path: Path, dest_path: Path):
-        """Add clone operation entry."""
-        details = f"Cloned to: {dest_path.name}"
-        self.add_entry(source_path, "clone", details)
+        """Add clone operation entry pointing to the cloned destination."""
+        details = f"Cloned from: {source_path.name}"
+        self.add_entry(dest_path, "clone", details)
         # Also add navigation to destination
         self.add_entry(dest_path, "navigate")
 

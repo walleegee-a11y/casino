@@ -322,7 +322,8 @@ class HistoryViewerDialog(QDialog):
         self.clear_button = QPushButton("Clear History")
         button_box.addButton(self.clear_button, QDialogButtonBox.ResetRole)
 
-        close_button = button_box.addButton(QDialogButtonBox.Close)
+        close_button = QPushButton("Close")
+        button_box.addButton(close_button, QDialogButtonBox.RejectRole)
 
         button_box.rejected.connect(self.reject)
 
@@ -667,11 +668,8 @@ class QuickHistoryWidget(QWidget):
         target_path = entry.path
 
         if entry.operation == "clone":
-            if entry.details and "Cloned to:" in entry.details:
-                dest_name = entry.details.split("Cloned to: ")[-1]
-                dest_path = entry.path.parent / dest_name
-                if dest_path.exists():
-                    target_path = dest_path
+            # entry.path is the cloned destination directory
+            target_path = entry.path
 
         elif entry.operation == "trash":
             # entry.path is the exact trashed item in TrashBin (or TrashBin itself)
