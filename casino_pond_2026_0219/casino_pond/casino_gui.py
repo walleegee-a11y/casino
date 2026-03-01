@@ -1288,6 +1288,7 @@ class FlowStatusWidget(QWidget):
         self._task_rows = {}        # task_name -> row index
         self._start_times = {}      # task_name -> QDateTime
         self._finished_secs = 0     # cumulative secs of all finished tasks
+        self._was_killed = False    # set True when Kill is confirmed by user
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick_runtimes)
         self._timer.start(1000)
@@ -1454,6 +1455,7 @@ class FlowStatusWidget(QWidget):
             QMessageBox.No
         )
         if reply == QMessageBox.Yes and self._kill_callback:
+            self._was_killed = True
             self._kill_callback()
 
     def _close_tab(self):
@@ -1471,6 +1473,8 @@ class FlowMonitorPanel(QWidget):
         self._flow_widgets = {}   # flow_id -> FlowStatusWidget
         self._splitter_ref = None  # QSplitter set by CasinoGUI
         self._expanded_size = 180  # remembered height before collapse
+        self._tab_counter = 0      # increments each new flow tab
+        self._flow_tab_nums = {}   # flow_id -> int (tab number)
         self._setup_ui()
 
     def set_splitter(self, splitter):
@@ -1535,14 +1539,17 @@ class FlowMonitorPanel(QWidget):
                 self.setMaximumHeight(16777215)
             self.updateGeometry()
 
-    def add_flow_tab(self, flow_id: str, flow_name: str, command: str = "", kill_callback=None, go_callback=None):
+    def add_flow_tab(self, flow_id: str, _flow_name: str, command: str = "", kill_callback=None, go_callback=None):
         """Create a new tab for a flow run. Safe to call from main thread via signal."""
         if flow_id in self._flow_widgets:
             return
         widget = FlowStatusWidget(panel=self, kill_callback=kill_callback, go_callback=go_callback)
         widget.set_command(command)
         self._flow_widgets[flow_id] = widget
-        self.tabs.addTab(widget, flow_name)
+        self._tab_counter += 1
+        tab_num = self._tab_counter
+        self._flow_tab_nums[flow_id] = tab_num
+        self.tabs.addTab(widget, f"flow-{tab_num}[running]")
         self.tabs.setCurrentWidget(widget)
         if not self.tabs.isVisible():
             self._toggle()
@@ -1553,15 +1560,28 @@ class FlowMonitorPanel(QWidget):
         if widget:
             widget.update_task(task_name, status, time_str)
 
-    def finish_flow_tab(self, flow_id: str, flow_name: str, succeeded: int, failed: int):
+    def finish_flow_tab(self, flow_id: str, _flow_name: str, _succeeded: int, failed: int):
         """Update tab title when flow completes."""
         widget = self._flow_widgets.get(flow_id)
         if not widget:
             return
         idx = self.tabs.indexOf(widget)
         if idx >= 0:
-            icon = "[OK]" if failed == 0 else f"[{failed}]"
-            self.tabs.setTabText(idx, f"{flow_name} {icon}")
+            tab_num = self._flow_tab_nums.get(flow_id, "?")
+            # fm_casino may count INTERRUPTED tasks as succeeded (failed==0),
+            # so also check if any row shows "- Stop" to catch that case.
+            has_stopped = widget._was_killed or any(
+                (item := widget.table.item(r, FlowStatusWidget.COL_STATUS)) is not None
+                and "Stop" in item.text()
+                for r in range(widget.table.rowCount())
+            )
+            if has_stopped:
+                status = "[stopped]"
+            elif failed == 0:
+                status = "[done]"
+            else:
+                status = "[failed]"
+            self.tabs.setTabText(idx, f"flow-{tab_num}{status}")
         widget.mark_finished()
 
 
@@ -1900,6 +1920,10 @@ class CasinoGUI(QtWidgets.QWidget):
         self.console_splitter.addWidget(self.flow_monitor)
         self.flow_monitor.set_splitter(self.console_splitter)
 
+        # Double-click splitter handle → auto-fit to Flow Monitor size
+        self._splitter_handle = self.console_splitter.handle(1)
+        self._splitter_handle.installEventFilter(self)
+
         # Console gets all stretch; flow monitor starts collapsed
         self.console_splitter.setStretchFactor(0, 1)
         self.console_splitter.setStretchFactor(1, 0)
@@ -2136,6 +2160,7 @@ class CasinoGUI(QtWidgets.QWidget):
             self.current_line_index += 1
         else:
             self.timer.stop()
+            self.scroll_to_bottom()
 
     def reset_manager_button_colors(self):
         """Reset the color of all manager buttons to default."""
@@ -2459,6 +2484,39 @@ class CasinoGUI(QtWidgets.QWidget):
                     background-color: {FOREST_GREEN};
                 }}
             """)
+
+    def eventFilter(self, obj, event):
+        if (obj is getattr(self, '_splitter_handle', None)
+                and event.type() == QtCore.QEvent.MouseButtonDblClick):
+            self._autofit_splitter()
+            return True
+        return super().eventFilter(obj, event)
+
+    def _autofit_splitter(self):
+        """Snap splitter so Flow Monitor gets exactly the height its content needs."""
+        total = self.console_splitter.height()
+        fm = self.flow_monitor
+
+        # Fixed chrome: panel header row + tab bar
+        header_h = 26
+        tab_bar_h = fm.tabs.tabBar().height() if fm.tabs.count() > 0 else 22
+
+        # Measure actual table content in the current tab
+        w = fm.tabs.currentWidget()
+        if w and hasattr(w, 'table'):
+            table = w.table
+            cmd_h = 22                                        # cmd label row
+            tbl_header_h = table.horizontalHeader().height()
+            tbl_rows_h = table.verticalHeader().length()      # sum of all row heights
+            content_h = cmd_h + tbl_header_h + tbl_rows_h + 6
+        else:
+            content_h = 80
+
+        natural = header_h + tab_bar_h + content_h + 8       # 8px for margins/borders
+        natural = max(natural, 60)
+        natural = min(natural, total - 50)
+        self.console_splitter.setSizes([max(total - natural, 50), natural])
+        self.scroll_to_bottom()
 
     def scroll_to_bottom(self):
         self.console_output.moveCursor(self.console_output.textCursor().End)
