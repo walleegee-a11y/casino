@@ -1287,6 +1287,7 @@ class FlowStatusWidget(QWidget):
         self._go_callback = go_callback
         self._task_rows = {}        # task_name -> row index
         self._start_times = {}      # task_name -> QDateTime
+        self._full_command = ""
         self._finished_secs = 0     # cumulative secs of all finished tasks
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick_runtimes)
@@ -1305,6 +1306,18 @@ class FlowStatusWidget(QWidget):
         self._cmd_label.setFont(QFont("Terminus", 7))
         self._cmd_label.setStyleSheet("color: #888888;")
         hdr.addWidget(self._cmd_label, stretch=1)
+
+        self._copy_btn = QPushButton("Copy")
+        self._copy_btn.setFont(QFont("Terminus", 7))
+        self._copy_btn.setFixedHeight(18)
+        self._copy_btn.setFixedWidth(38)
+        self._copy_btn.setStyleSheet(
+            "QPushButton { background: #1a3a1a; color: #9dce9d; border: 1px solid #2a8c2a; border-radius: 2px; }"
+            "QPushButton:hover { background: #2a8c2a; color: white; }"
+        )
+        self._copy_btn.setToolTip("Copy command options to clipboard")
+        self._copy_btn.clicked.connect(self._copy_command)
+        hdr.addWidget(self._copy_btn)
 
         go_btn = QPushButton("Go")
         go_btn.setFont(QFont("Terminus", 7))
@@ -1433,9 +1446,31 @@ class FlowStatusWidget(QWidget):
         import re as _re
         m = _re.match(r'^"[^"]*"\s+"[^"]*"\s*(.*)', command)
         args = m.group(1).strip() if m else command
+        self._full_command = args   # stored for clipboard copy
         display = args if args else "(no args)"
         self._cmd_label.setText(display)
         self._cmd_label.setToolTip(command)   # full command on hover
+
+    def _copy_command(self):
+        # _cmd_label always shows the args-only text; prefer it over _full_command
+        text = self._cmd_label.text()
+        if not text or text in ("─", "(no args)"):
+            text = self._full_command
+        if not text:
+            return
+        QApplication.clipboard().setText(text)
+        # Brief visual feedback
+        self._copy_btn.setText("OK!")
+        self._copy_btn.setStyleSheet(
+            "QPushButton { background: #2a8c2a; color: white; border: 1px solid #2a8c2a; border-radius: 2px; }"
+        )
+        QTimer.singleShot(900, lambda: (
+            self._copy_btn.setText("Copy"),
+            self._copy_btn.setStyleSheet(
+                "QPushButton { background: #1a3a1a; color: #9dce9d; border: 1px solid #2a8c2a; border-radius: 2px; }"
+                "QPushButton:hover { background: #2a8c2a; color: white; }"
+            )
+        ))
 
     def _go_to_dir(self):
         if self._go_callback:
