@@ -108,6 +108,16 @@ def hide_cursor():
     sys.stdout.write('\033[?25l')
     sys.stdout.flush()
 
+def enter_alternate_screen():
+    """Switch to alternate screen buffer — no scrollback accumulation (like htop/vim)"""
+    sys.stdout.write('\033[?1049h')
+    sys.stdout.flush()
+
+def leave_alternate_screen():
+    """Restore original screen buffer"""
+    sys.stdout.write('\033[?1049l')
+    sys.stdout.flush()
+
 class DisplayBuffer:
     """Buffer for collecting output before displaying all at once"""
     def __init__(self):
@@ -482,7 +492,8 @@ def main():
 
     time.sleep(1)
 
-    # Hide cursor for smoother display updates
+    # Enter alternate screen so refresh frames don't accumulate in scrollback (like htop/vim)
+    enter_alternate_screen()
     hide_cursor()
 
     try:
@@ -770,7 +781,8 @@ def main():
                 time.sleep(refresh_interval)
 
     except KeyboardInterrupt:
-        show_cursor()  # Restore cursor visibility
+        show_cursor()
+        leave_alternate_screen()
         clear_screen()
         print(f"{colors['bold']}{colors['yellow']}Task monitor stopped by user.{colors['reset']}")
         print(f"Monitor ran for {format_runtime(time.time() - monitor_start_time)} with {update_count} updates.")
@@ -781,13 +793,15 @@ def main():
             print(f"Final status: {final_completion:.1f}% completion, {success_count} successful, {failed_count} failed")
 
     except Exception as e:
-        show_cursor()  # Restore cursor visibility
+        show_cursor()
+        leave_alternate_screen()
         clear_screen()
         print(f"{colors['red']}Error in task monitor: {e}{colors['reset']}")
         print("Monitor terminated unexpectedly.")
 
     finally:
-        show_cursor()  # Always restore cursor on exit
+        show_cursor()
+        leave_alternate_screen()  # Always restore original screen on exit
 
 if __name__ == "__main__":
     main()

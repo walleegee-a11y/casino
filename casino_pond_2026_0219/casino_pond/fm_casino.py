@@ -1049,6 +1049,10 @@ exit $exit_code
             print(f"CONFIRMED: Task {task['name']} failed - execution will stop")
         elif status == "Interrupted":
             print(f"CONFIRMED: Task {task['name']} was interrupted - execution will stop")
+            if not interrupted:
+                # Terminal closed externally (not via Kill button).
+                # Signal handler hasn't emitted CASINO_TASK_STATUS yet — emit now so GUI updates.
+                print(f"CASINO_TASK_STATUS: {flow_id}|{task['name']}|INTERRUPTED|{get_current_time()}", flush=True)
             interrupted = True
         elif status == "Timeout":
             print(f"CONFIRMED: Task {task['name']} timed out - execution will stop")
@@ -1114,13 +1118,17 @@ def monitor_with_process_tree_csh(process, status_file, pid_file, task_name, max
     last_status = None
     last_process_check = time.time()
     last_terminal_check = time.time()
-    terminal_closed_warned = False  # Track if we've already warned about terminal closure
+    last_pid_check = time.time()
+    seen_running = False         # set True once status file shows RUNNING (csh has written PID file)
 
     # BALANCED: Check process health every 5 minutes for stale status detection
     process_check_interval = 300  # 5 minutes for deep process checks
 
     # Terminal death detection: Check every 10 seconds (MUCH faster)
     terminal_check_interval = 10  # 10 seconds for terminal process checks
+
+    # Direct csh PID check: same cadence as terminal check, independent of gnome-terminal --wait
+    pid_check_interval = 10  # 10 seconds
 
     # Grace period for stale status file (only for deep process checks)
     status_file_grace_period = 600  # 10 minutes without status update
@@ -1147,6 +1155,7 @@ def monitor_with_process_tree_csh(process, status_file, pid_file, task_name, max
                     # This prevents "stale status" warnings for long-running tasks
                     if status_content == "RUNNING":
                         last_status_update = current_time  # Update EVERY time we see RUNNING
+                        seen_running = True  # csh has written its PID file; PID checks can start
 
                     if status_content != last_status:
                         if status_content == "RUNNING":
@@ -1172,23 +1181,29 @@ def monitor_with_process_tree_csh(process, status_file, pid_file, task_name, max
         # This catches accidental "X" clicks on terminal window QUICKLY
         if current_time - last_terminal_check > terminal_check_interval:
             if detect_terminal_closed_fast(process, task_name):
-                # Double-check: Is the actual task process still running?
-                if not check_task_process_alive(pid_file, task_name):
-                    # Task is dead - print final message and exit
-                    if not terminal_closed_warned:
-                        print(f"WARNING: Terminal window for {task_name} was closed and task process is dead - marking as INTERRUPTED")
-                    else:
-                        print(f"CONFIRMED: Task process is now dead - marking as INTERRUPTED")
-                    cleanup_orphaned_processes(pid_file, task_name)
-                    return "Interrupted"
+                # Terminal window was closed — always treat as interruption.
+                if check_task_process_alive(pid_file, task_name):
+                    print(f"WARNING: Terminal window for {task_name} was closed (task still running) - killing and marking as INTERRUPTED")
                 else:
-                    # Terminal closed but task still running - warn only ONCE
-                    if not terminal_closed_warned:
-                        print(f"WARNING: Terminal window for {task_name} was closed (task still running in background - monitoring...)")
-                        terminal_closed_warned = True
-                    # Continue monitoring silently
+                    print(f"WARNING: Terminal window for {task_name} was closed and task process is dead - marking as INTERRUPTED")
+                print(f"CASINO_TASK_STATUS: {flow_id}|{task_name}|INTERRUPTED|{get_current_time()}", flush=True)
+                cleanup_orphaned_processes(pid_file, task_name)
+                return "Interrupted"
 
             last_terminal_check = current_time
+
+        # FALLBACK: Direct csh PID health check (reliable even if gnome-terminal --wait is unreliable)
+        # Only runs after csh has confirmed it started (seen_running) to avoid startup race.
+        if seen_running and current_time - last_pid_check > pid_check_interval:
+            if not check_task_process_alive(pid_file, task_name):
+                # csh PID is dead but status still shows RUNNING → terminal was closed with "X"
+                print(f"WARNING: Task process for {task_name} has died while status is RUNNING "
+                      f"- terminal likely closed accidentally, marking as INTERRUPTED")
+                print(f"CASINO_TASK_STATUS: {flow_id}|{task_name}|INTERRUPTED|{get_current_time()}",
+                      flush=True)
+                cleanup_orphaned_processes(pid_file, task_name)
+                return "Interrupted"
+            last_pid_check = current_time
 
         # SECONDARY: Deep process health check (every 5 minutes, only if status stale)
         if current_time - last_process_check > process_check_interval:
